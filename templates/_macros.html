@@ -1,0 +1,36 @@
+{# Small reusable pieces shared by several pages. #}
+
+{% macro stock_badge(status) -%}
+  {%- set css = {'In Stock': 'green', 'Low Stock': 'yellow', 'Out of Stock': 'red'}[status] -%}
+  <span class="badge badge-{{ css }}">{{ status }}</span>
+{%- endmacro %}
+
+{% macro request_badge(status) -%}
+  {%- set css = {'Pending': 'yellow', 'Approved': 'green', 'Rejected': 'red'}[status] -%}
+  <span class="badge badge-{{ css }}">{{ status }}</span>
+{%- endmacro %}
+
+{% macro stat_cards(stats) -%}
+  <section class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Products</div>
+      <div class="stat-value">{{ stats.total_products }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Units on hand</div>
+      <div class="stat-value">{{ "{:,}".format(stats.total_units) }}</div>
+    </div>
+    <div class="stat-card stat-yellow">
+      <div class="stat-label">Low stock</div>
+      <div class="stat-value">{{ stats.low_stock }}</div>
+    </div>
+    <div class="stat-card stat-red">
+      <div class="stat-label">Out of stock</div>
+      <div class="stat-value">{{ stats.out_of_stock }}</div>
+    </div>
+  </section>
+{%- endmacro %}
+
+{% macro date(value) -%}
+  {{ value.strftime('%b %d, %Y %H:%M') }} UTC
+{%- endmacro %}

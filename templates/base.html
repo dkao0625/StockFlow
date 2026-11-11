@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}StockFlow{% endblock %} · StockFlow</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="{% if g.user %}has-sidebar{% else %}auth-page{% endif %}">
+
+{% if g.user %}
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">SF</span>
+      <span class="brand-name">StockFlow</span>
+    </div>
+
+    <nav class="nav">
+      {% set endpoint = request.endpoint or '' %}
+      {% if g.user.is_manager %}
+        <a href="{{ url_for('inventory.manager_dashboard') }}"
+           class="{{ 'active' if endpoint == 'inventory.manager_dashboard' }}">Requests</a>
+      {% else %}
+        <a href="{{ url_for('inventory.employee_dashboard') }}"
+           class="{{ 'active' if endpoint == 'inventory.employee_dashboard' }}">My Dashboard</a>
+      {% endif %}
+      <a href="{{ url_for('inventory.inventory_list') }}"
+         class="{{ 'active' if endpoint == 'inventory.inventory_list' }}">Inventory</a>
+    </nav>
+
+    <div class="sidebar-user">
+      <div>
+        <div class="user-name">{{ g.user.username }}</div>
+        <div class="user-role">{{ g.user.role|capitalize }}</div>
+      </div>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-ghost">Log out</button>
+      </form>
+    </div>
+  </aside>
+{% endif %}
+
+<main class="content">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flashes">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}" role="alert">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

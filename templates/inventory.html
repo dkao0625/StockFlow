@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stock_badge, stat_cards %}
+{% block title %}Inventory{% endblock %}
+{% block content %}
+<header class="page-header">
+  <h1>Inventory</h1>
+  <p class="muted">Current stock levels for all products.</p>
+</header>
+
+{{ stat_cards(stats) }}
+
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>SKU</th>
+          <th class="num">Available</th>
+          <th class="num">Reorder level</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for product in products %}
+          <tr>
+            <td>{{ product.name }}</td>
+            <td class="mono">{{ product.sku }}</td>
+            <td class="num">{{ product.quantity }}</td>
+            <td class="num">{{ product.reorder_level }}</td>
+            <td>{{ stock_badge(product.stock_status) }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">No products yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

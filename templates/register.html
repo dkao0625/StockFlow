@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <div class="auth-brand"><span class="brand-mark">SF</span> StockFlow</div>
+  <h1>Create employee account</h1>
+  <p class="muted">Manager accounts are set up by an administrator.</p>
+
+  <form method="post" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="username">Username</label>
+    <input id="username" name="username" value="{{ username }}" autocomplete="username"
+           pattern="[A-Za-z0-9_]{3,30}" title="3-30 letters, numbers, or underscores" required autofocus>
+
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required>
+    <small class="hint">At least 8 characters.</small>
+
+    <label for="confirm_password">Confirm password</label>
+    <input id="confirm_password" name="confirm_password" type="password" minlength="8" autocomplete="new-password" required>
+
+    <button type="submit" class="btn btn-primary btn-block">Create account</button>
+  </form>
+
+  <p class="auth-switch">Already have an account? <a href="{{ url_for('auth.login') }}">Log in</a></p>
+</div>
+{% endblock %}

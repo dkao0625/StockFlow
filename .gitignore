@@ -1,0 +1,20 @@
+# Secrets -- never commit these
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Local databases (real data lives in Neon)
+*.db
+*.sqlite3
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

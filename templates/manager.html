@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "_macros.html" import request_badge, stat_cards, date %}
+{% block title %}Requests{% endblock %}
+{% block content %}
+<header class="page-header">
+  <h1>Inventory requests</h1>
+  <p class="muted">Review damage and missing-item reports from employees.</p>
+</header>
+
+{{ stat_cards(stats) }}
+
+<section class="panel">
+  <h2>Pending review <span class="count">{{ pending_requests|length }}</span></h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Employee</th>
+          <th>Product</th>
+          <th>Type</th>
+          <th class="num">Qty</th>
+          <th class="num">In stock</th>
+          <th>Reason</th>
+          <th>Decision</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in pending_requests %}
+          <tr>
+            <td class="mono">{{ req.id }}</td>
+            <td>{{ req.employee.username }}<div class="sub">{{ date(req.created_at) }}</div></td>
+            <td>{{ req.product.name }}<div class="sub mono">{{ req.product.sku }}</div></td>
+            <td>{{ req.reason }}</td>
+            <td class="num">{{ req.quantity }}</td>
+            <td class="num {{ 'text-red' if req.product.quantity < req.quantity }}">{{ req.product.quantity }}</td>
+            <td class="reason">{{ req.notes }}</td>
+            <td>
+              {# One form, two buttons: each button posts to a different URL. #}
+              <form method="post" class="decision-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input name="manager_note" maxlength="500" placeholder="Note (required to reject)"
+                       aria-label="Manager note for request {{ req.id }}">
+                <div class="decision-buttons">
+                  <button type="submit" class="btn btn-green"
+                          formaction="{{ url_for('inventory.approve_request', request_id=req.id) }}">Approve</button>
+                  <button type="submit" class="btn btn-red"
+                          formaction="{{ url_for('inventory.reject_request', request_id=req.id) }}">Reject</button>
+                </div>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="empty">No pending requests. 🎉</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Request history</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Employee</th>
+          <th>Product</th>
+          <th>Type</th>
+          <th class="num">Qty</th>
+          <th>Status</th>
+          <th>Reviewed by</th>
+          <th>Manager note</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in request_history %}
+          <tr>
+            <td class="mono">{{ req.id }}</td>
+            <td>{{ req.employee.username }}<div class="sub">{{ date(req.created_at) }}</div></td>
+            <td>{{ req.product.name }}</td>
+            <td>{{ req.reason }}</td>
+            <td class="num">{{ req.quantity }}</td>
+            <td>{{ request_badge(req.status) }}</td>
+            <td>{{ req.manager.username if req.manager else '—' }}</td>
+            <td>{{ req.manager_note or '—' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="empty">No reviewed requests yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

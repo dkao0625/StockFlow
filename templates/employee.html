@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_macros.html" import request_badge, stat_cards, date %}
+{% block title %}My Dashboard{% endblock %}
+{% block content %}
+<header class="page-header">
+  <h1>Welcome, {{ g.user.username }}</h1>
+  <p class="muted">Report damaged or missing items and track your requests.</p>
+</header>
+
+{{ stat_cards(stats) }}
+
+<div class="grid-2">
+  <section class="panel">
+    <h2>Report a problem</h2>
+    <form method="post" action="{{ url_for('inventory.submit_request') }}" class="form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="product_id">Product</label>
+      <select id="product_id" name="product_id" required>
+        <option value="">Select a product…</option>
+        {% for product in products %}
+          <option value="{{ product.id }}" {{ 'disabled' if product.quantity == 0 }}>
+            {{ product.name }} ({{ product.sku }}) — {{ product.quantity }} in stock
+          </option>
+        {% endfor %}
+      </select>
+
+      <div class="row">
+        <div>
+          <label for="reason">Type</label>
+          <select id="reason" name="reason" required>
+            {% for reason in reasons %}
+              <option value="{{ reason }}">{{ reason }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="quantity">Quantity</label>
+          <input id="quantity" name="quantity" type="number" min="1" step="1" required>
+        </div>
+      </div>
+
+      <label for="notes">Explanation</label>
+      <textarea id="notes" name="notes" rows="3" maxlength="500"
+                placeholder="e.g. Box crushed during unloading in aisle 4" required></textarea>
+
+      <button type="submit" class="btn btn-primary">Submit report</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>My requests</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Product</th>
+            <th>Type</th>
+            <th class="num">Qty</th>
+            <th>Status</th>
+            <th>Manager note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for req in my_requests %}
+            <tr>
+              <td class="mono">{{ req.id }}</td>
+              <td>{{ req.product.name }}<div class="sub">{{ date(req.created_at) }}</div></td>
+              <td>{{ req.reason }}</td>
+              <td class="num">{{ req.quantity }}</td>
+              <td>{{ request_badge(req.status) }}</td>
+              <td>{{ req.manager_note or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="empty">You haven't submitted any reports yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

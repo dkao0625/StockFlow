@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Error {{ code }}{% endblock %}
+{% block content %}
+<div class="{{ 'panel' if g.user else 'auth-card' }} error-box">
+  <div class="error-code">{{ code }}</div>
+  <p>{{ message }}</p>
+  <a class="btn btn-primary" href="{{ url_for('inventory.index') }}">Back to StockFlow</a>
+</div>
+{% endblock %}
