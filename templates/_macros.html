@@ -34,3 +34,23 @@
 {% macro date(value) -%}
   {{ value.strftime('%b %d, %Y %H:%M') }} UTC
 {%- endmacro %}
+
+{# Bulk pages: carry the selected product ids (and where to go back to) in the form. #}
+{% macro selection_fields(products, next_url) -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  {% for product in products %}
+    <input type="hidden" name="product_ids" value="{{ product.id }}">
+  {% endfor %}
+{%- endmacro %}
+
+{% macro selected_list(products) -%}
+  <details class="selected-list">
+    <summary>Show the {{ products|length }} selected product{{ 's' if products|length != 1 }}</summary>
+    <ul>
+      {% for product in products %}
+        <li><span class="mono">{{ product.sku }}</span> {{ product.name }}</li>
+      {% endfor %}
+    </ul>
+  </details>
+{%- endmacro %}

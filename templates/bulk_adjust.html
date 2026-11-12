@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "_macros.html" import selection_fields %}
+{% block title %}Adjust stock{% endblock %}
+{% block content %}
+<a class="back-link" href="{{ next_url }}">← Back to inventory</a>
+<header class="page-header">
+  <h1>Adjust stock</h1>
+  <p class="muted">
+    {% if g.user.is_manager %}
+      Changes are applied right away and recorded in each product's stock history.
+    {% else %}
+      Your changes are sent to a manager as <strong>Pending</strong> requests. Stock only changes when a manager approves them.
+    {% endif %}
+  </p>
+</header>
+
+<form method="post" data-submit-once>
+  {{ selection_fields(products, next_url) }}
+
+  <section class="panel">
+    <p class="affected"><strong>{{ products|length }} product{{ 's' if products|length != 1 }} selected.</strong>
+      Enter a change for each one.</p>
+    <div class="table-wrap">
+      <table class="adjust-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th class="num">In stock</th>
+            <th>Change</th>
+            <th>Quantity</th>
+            <th>Reason</th>
+            <th>Note <span class="optional">(optional)</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for product in products %}
+            {% set pid = product.id|string %}
+            {% set direction = form.get('direction_' ~ pid, 'decrease') %}
+            <tr class="{{ 'row-error' if errors.get(product.id) }}">
+              <td>{{ product.name }}<div class="sub mono">{{ product.sku }}</div></td>
+              <td class="num">{{ product.quantity }}</td>
+              <td>
+                <select name="direction_{{ pid }}" aria-label="Increase or decrease {{ product.name }}">
+                  <option value="decrease" {{ 'selected' if direction == 'decrease' }}>− Decrease</option>
+                  <option value="increase" {{ 'selected' if direction == 'increase' }}>+ Increase</option>
+                </select>
+              </td>
+              <td>
+                <input name="quantity_{{ pid }}" type="number" min="1" step="1" required class="qty-input"
+                       value="{{ form.get('quantity_' ~ pid, '') }}" aria-label="Quantity for {{ product.name }}">
+              </td>
+              <td>
+                <select name="reason_{{ pid }}" required aria-label="Reason for {{ product.name }}">
+                  <option value="">Choose…</option>
+                  <optgroup label="Decrease">
+                    {% for reason in decrease_reasons %}
+                      <option value="{{ reason }}" {{ 'selected' if direction == 'decrease' and form.get('reason_' ~ pid) == reason }}>{{ reason }}</option>
+                    {% endfor %}
+                  </optgroup>
+                  <optgroup label="Increase">
+                    {% for reason in increase_reasons %}
+                      <option value="{{ reason }}" {{ 'selected' if direction == 'increase' and form.get('reason_' ~ pid) == reason }}>{{ reason }}</option>
+                    {% endfor %}
+                  </optgroup>
+                </select>
+              </td>
+              <td>
+                <input name="note_{{ pid }}" maxlength="200" value="{{ form.get('note_' ~ pid, '') }}"
+                       placeholder="e.g. PO #1042" aria-label="Note for {{ product.name }}">
+                {% if errors.get(product.id) %}<p class="field-error">{{ errors[product.id] }}</p>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <a class="btn btn-secondary" href="{{ next_url }}">Cancel</a>
+    <button type="submit" class="btn btn-primary" data-busy-text="Saving…">
+      {{ 'Apply' if g.user.is_manager else 'Submit' }} {{ products|length }} adjustment{{ 's' if products|length != 1 }}{{ '' if g.user.is_manager else ' for approval' }}
+    </button>
+  </div>
+</form>
+{% endblock %}

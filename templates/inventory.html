@@ -1,40 +1,132 @@
 {% extends "base.html" %}
-{% from "_macros.html" import stock_badge, stat_cards %}
+{% from "_macros.html" import stock_badge, stat_cards, date %}
 {% block title %}Inventory{% endblock %}
 {% block content %}
-<header class="page-header">
-  <h1>Inventory</h1>
-  <p class="muted">Current stock levels for all products.</p>
+{# The current URL (with filters), so bulk pages and edits can come back here. #}
+{% set this_page = request.full_path.rstrip('?') %}
+
+<header class="page-header product-header">
+  <div>
+    <h1>Inventory{% if showing_archived %} <span class="muted-title">· Archived</span>{% endif %}</h1>
+    <p class="muted">
+      {% if showing_archived %}Archived products are hidden from active inventory. Their history is kept.
+      {% else %}Current stock levels. Click a product to see its details.{% endif %}
+    </p>
+  </div>
+  <div class="header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('products.new_product') }}">+ Add product</a>
+  </div>
 </header>
 
-{{ stat_cards(stats) }}
+{% if not showing_archived %}{{ stat_cards(stats) }}{% endif %}
 
-<section class="panel">
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Product</th>
-          <th>SKU</th>
-          <th class="num">Available</th>
-          <th class="num">Reorder level</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for product in products %}
+<!-- Search and filters (a normal GET form, so the URL can be bookmarked) -->
+<form method="get" class="filter-bar" role="search">
+  <input type="hidden" name="show" value="{{ filters.show }}">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search name, SKU, or location"
+         aria-label="Search products">
+  <select name="category" aria-label="Category">
+    <option value="">All categories</option>
+    {% for category in categories %}
+      <option value="{{ category }}" {{ 'selected' if filters.category == category }}>{{ category }}</option>
+    {% endfor %}
+  </select>
+  <select name="status" aria-label="Stock status">
+    <option value="">All statuses</option>
+    {% for status in statuses %}
+      <option value="{{ status }}" {{ 'selected' if filters.status == status }}>{{ status }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-secondary">Filter</button>
+  {% if is_filtered %}
+    <a class="btn btn-link" href="{{ url_for('inventory.inventory_list', show=filters.show) }}">Clear</a>
+  {% endif %}
+  <span class="filter-spacer"></span>
+  {% if showing_archived %}
+    <a class="btn btn-link" href="{{ url_for('inventory.inventory_list') }}">← Active products</a>
+  {% else %}
+    <a class="btn btn-link" href="{{ url_for('inventory.inventory_list', show='archived') }}">View archived</a>
+  {% endif %}
+</form>
+
+{#
+  The table sits inside a GET form. Ticking checkboxes adds product_ids to
+  it; each toolbar button sends the form to a different bulk page.
+  data-bulk turns on the selection behaviour in static/app.js.
+#}
+<section class="panel" data-bulk>
+  <form method="get" id="bulk-form">
+    <input type="hidden" name="next" value="{{ this_page }}">
+
+    {% if not showing_archived and products %}
+      <div class="table-toolbar">
+        <span class="muted">{{ products|length }} product{{ 's' if products|length != 1 }}{% if is_filtered %} match your filters{% endif %}</span>
+        <button type="button" class="btn btn-secondary" data-bulk-start>Edit Inventory</button>
+      </div>
+
+      <!-- Shown only in edit mode -->
+      <div class="bulk-toolbar" data-bulk-toolbar hidden>
+        <strong><span data-selected-count>0</span> selected</strong>
+        <span class="toolbar-divider"></span>
+        <button type="submit" class="btn btn-secondary" formaction="{{ url_for('bulk.edit') }}" data-bulk-action disabled>Bulk Edit</button>
+        <button type="submit" class="btn btn-secondary" formaction="{{ url_for('bulk.adjust') }}" data-bulk-action disabled>Adjust Stock</button>
+        <button type="submit" class="btn btn-red" formaction="{{ url_for('bulk.archive') }}" data-bulk-action disabled>Delete</button>
+        <span class="filter-spacer"></span>
+        <button type="button" class="btn btn-link" data-bulk-cancel>Cancel</button>
+      </div>
+    {% endif %}
+
+    <div class="table-wrap">
+      <table class="selectable">
+        <thead>
           <tr>
-            <td>{{ product.name }}</td>
-            <td class="mono">{{ product.sku }}</td>
-            <td class="num">{{ product.quantity }}</td>
-            <td class="num">{{ product.reorder_level }}</td>
-            <td>{{ stock_badge(product.stock_status) }}</td>
+            <th class="select-col">
+              <input type="checkbox" data-select-all aria-label="Select all visible products">
+            </th>
+            <th>Product</th>
+            <th>SKU</th>
+            <th>Category</th>
+            <th class="num">Available</th>
+            <th>Unit</th>
+            <th>Location</th>
+            <th>{{ 'Archived' if showing_archived else 'Status' }}</th>
+            {% if not showing_archived %}<th class="actions-col"><span class="sr-only">Actions</span></th>{% endif %}
           </tr>
-        {% else %}
-          <tr><td colspan="5" class="empty">No products yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+        </thead>
+        <tbody>
+          {% for product in products %}
+            <tr>
+              <td class="select-col">
+                <input type="checkbox" name="product_ids" value="{{ product.id }}" data-select-item
+                       aria-label="Select {{ product.name }}">
+              </td>
+              <td><a class="product-link" href="{{ url_for('products.detail', product_id=product.id) }}">{{ product.name }}</a></td>
+              <td class="mono">{{ product.sku }}</td>
+              <td>{{ product.category }}</td>
+              <td class="num">{{ "{:,}".format(product.quantity) }}</td>
+              <td>{{ product.unit }}</td>
+              <td>{{ product.location or '—' }}</td>
+              <td>
+                {% if showing_archived %}<span class="sub">{{ date(product.archived_at) }}</span>
+                {% else %}{{ stock_badge(product.stock_status) }}{% endif %}
+              </td>
+              {% if not showing_archived %}
+                <td class="actions-col">
+                  <a class="btn btn-small btn-secondary"
+                     href="{{ url_for('products.edit', product_id=product.id, next=this_page) }}">Edit</a>
+                </td>
+              {% endif %}
+            </tr>
+          {% else %}
+            <tr><td colspan="9" class="empty">
+              {% if is_filtered %}No products match these filters.
+              {% elif showing_archived %}No archived products.
+              {% else %}No products yet.{% endif %}
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
 </section>
 {% endblock %}

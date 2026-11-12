@@ -4,14 +4,15 @@
 {% block content %}
 <header class="page-header">
   <h1>Welcome, {{ g.user.username }}</h1>
-  <p class="muted">Report damaged or missing items and track your requests.</p>
+  <p class="muted">Report damaged or missing items and track your requests.
+    See all products on the <a href="{{ url_for('inventory.inventory_list') }}">Inventory</a> page.</p>
 </header>
 
 {{ stat_cards(stats) }}
 
 <div class="grid-2">
   <section class="panel">
-    <h2>Report a problem</h2>
+    <h2 id="report">Report a problem</h2>
     <form method="post" action="{{ url_for('inventory.submit_request') }}" class="form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -19,7 +20,8 @@
       <select id="product_id" name="product_id" required>
         <option value="">Select a product…</option>
         {% for product in products %}
-          <option value="{{ product.id }}" {{ 'disabled' if product.quantity == 0 }}>
+          <option value="{{ product.id }}" {{ 'disabled' if product.quantity == 0 }}
+                  {{ 'selected' if product.id == selected_product_id }}>
             {{ product.name }} ({{ product.sku }}) — {{ product.quantity }} in stock
           </option>
         {% endfor %}
@@ -56,8 +58,7 @@
           <tr>
             <th>#</th>
             <th>Product</th>
-            <th>Type</th>
-            <th class="num">Qty</th>
+            <th>Request</th>
             <th>Status</th>
             <th>Manager note</th>
           </tr>
@@ -66,14 +67,13 @@
           {% for req in my_requests %}
             <tr>
               <td class="mono">{{ req.id }}</td>
-              <td>{{ req.product.name }}<div class="sub">{{ date(req.created_at) }}</div></td>
-              <td>{{ req.reason }}</td>
-              <td class="num">{{ req.quantity }}</td>
+              <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a><div class="sub">{{ date(req.created_at) }}</div></td>
+              <td>{{ req.summary }}</td>
               <td>{{ request_badge(req.status) }}</td>
               <td>{{ req.manager_note or '—' }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="empty">You haven't submitted any reports yet.</td></tr>
+            <tr><td colspan="5" class="empty">You haven't submitted any reports yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
