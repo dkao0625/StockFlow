@@ -30,7 +30,7 @@
           <tr>
             <td class="mono">{{ req.id }}</td>
             <td>{{ req.employee.username }}<div class="sub">{{ date(req.created_at) }}</div></td>
-            <td>{{ req.product.name }}<div class="sub mono">{{ req.product.sku }}</div></td>
+            <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a><div class="sub mono">{{ req.product.sku }}</div></td>
             <td>{{ req.reason }}</td>
             <td class="num">{{ req.quantity }}</td>
             <td class="num {{ 'text-red' if req.product.quantity < req.quantity }}">{{ req.product.quantity }}</td>
@@ -79,7 +79,7 @@
           <tr>
             <td class="mono">{{ req.id }}</td>
             <td>{{ req.employee.username }}<div class="sub">{{ date(req.created_at) }}</div></td>
-            <td>{{ req.product.name }}</td>
+            <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a></td>
             <td>{{ req.reason }}</td>
             <td class="num">{{ req.quantity }}</td>
             <td>{{ request_badge(req.status) }}</td>

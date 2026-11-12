@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stock_badge, request_badge, date %}
+{% block title %}{{ product.name }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{{ url_for('inventory.inventory_list') }}">← All inventory</a>
+
+<header class="page-header product-header">
+  <div>
+    <h1>{{ product.name }}</h1>
+    <p class="muted"><span class="mono">{{ product.sku }}</span> · {{ product.category }} · {{ stock_badge(product.stock_status) }}</p>
+  </div>
+  {% if g.user.is_manager %}
+    <a class="btn btn-secondary" href="{{ url_for('products.edit', product_id=product.id) }}">Edit product</a>
+  {% elif product.quantity > 0 %}
+    <a class="btn btn-red" href="{{ url_for('inventory.employee_dashboard', product_id=product.id) }}#report">
+      Report damaged / missing
+    </a>
+  {% endif %}
+</header>
+
+<section class="stats stats-3">
+  <div class="stat-card">
+    <div class="stat-label">Available</div>
+    <div class="stat-value">{{ "{:,}".format(product.quantity) }} <span class="stat-unit">{{ product.unit|lower }}</span></div>
+  </div>
+  <div class="stat-card stat-yellow">
+    <div class="stat-label">Reorder level</div>
+    <div class="stat-value">{{ "{:,}".format(product.reorder_level) }}</div>
+  </div>
+  <div class="stat-card {{ 'stat-red' if product.stock_status == 'Out of Stock' else 'stat-yellow' if product.stock_status == 'Low Stock' else 'stat-green' }}">
+    <div class="stat-label">Status</div>
+    <div class="stat-value stat-text">{{ product.stock_status }}</div>
+  </div>
+</section>
+
+<div class="grid-2">
+  <div class="stack">
+    <section class="panel">
+      <h2>Product details</h2>
+      <dl class="details">
+        <dt>Description</dt>
+        <dd>{{ product.description or '—' }}</dd>
+        <dt>Unit of measurement</dt>
+        <dd>{{ product.unit }}</dd>
+        <dt>Storage location</dt>
+        <dd>{{ product.location or '—' }}</dd>
+        <dt>Supplier</dt>
+        <dd>{{ product.supplier or '—' }}</dd>
+        {% if g.user.is_manager %}
+          {# Cost is business-sensitive: only rendered for managers. #}
+          <dt>Unit cost</dt>
+          <dd>{{ '$' ~ '{:,.2f}'.format(product.unit_cost) if product.unit_cost is not none else '—' }}</dd>
+        {% endif %}
+        <dt>Reorder level</dt>
+        <dd>{{ product.reorder_level }}</dd>
+        <dt>Created</dt>
+        <dd>{{ date(product.created_at) }}</dd>
+        <dt>Last updated</dt>
+        <dd>{{ date(product.updated_at) }}</dd>
+      </dl>
+    </section>
+
+    {% if g.user.is_manager %}
+      {# Only managers change stock directly; the route checks this too. #}
+      <section class="panel">
+        <h2>Add stock</h2>
+        <p class="muted">Received a delivery? Add it here. It's recorded in the stock history.</p>
+        <form method="post" action="{{ url_for('products.restock', product_id=product.id) }}" class="form" data-submit-once>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label for="quantity">Quantity to add ({{ product.unit|lower }})</label>
+          <input id="quantity" name="quantity" type="number" min="1" step="1" required>
+          <label for="note">Note <span class="optional">(optional)</span></label>
+          <input id="note" name="note" maxlength="255" placeholder="e.g. Delivery from supplier, PO #1042">
+          <button type="submit" class="btn btn-primary" data-busy-text="Adding…">Add to stock</button>
+        </form>
+      </section>
+    {% endif %}
+  </div>
+
+  <section class="panel">
+    <h2>Stock history</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th class="num">Change</th>
+            <th>By</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for movement in stock_history %}
+            <tr>
+              <td class="nowrap">{{ date(movement.created_at) }}</td>
+              <td class="num {{ 'text-green' if movement.quantity_change > 0 else 'text-red' }}">
+                {{ '%+d'|format(movement.quantity_change) }}
+              </td>
+              <td>{{ movement.actor.username if movement.actor else '—' }}</td>
+              <td>{{ movement.note or ('Request #' ~ movement.request_id if movement.request_id else '—') }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">No stock changes recorded yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<section class="panel section-gap">
+  <h2>{{ 'Damage & missing reports' if g.user.is_manager else 'My reports for this product' }}</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          {% if g.user.is_manager %}<th>Employee</th>{% endif %}
+          <th>Type</th>
+          <th class="num">Qty</th>
+          <th>Explanation</th>
+          <th>Status</th>
+          <th>Manager note</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in product_requests %}
+          <tr>
+            <td class="mono">{{ req.id }}</td>
+            {% if g.user.is_manager %}<td>{{ req.employee.username }}</td>{% endif %}
+            <td>{{ req.reason }}<div class="sub">{{ date(req.created_at) }}</div></td>
+            <td class="num">{{ req.quantity }}</td>
+            <td class="reason">{{ req.notes }}</td>
+            <td>{{ request_badge(req.status) }}</td>
+            <td>{{ req.manager_note or '—' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="empty">No reports for this product.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

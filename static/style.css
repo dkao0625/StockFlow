@@ -200,24 +200,69 @@ textarea { resize: vertical; }
 .error-code { font-size: 48px; font-weight: 800; color: var(--navy); }
 
 
-/* ---------- Add product form (inventory page) ---------- */
+/* ---------- Product detail page ---------- */
 
-.product-form {
+.back-link { display: inline-block; margin-bottom: 12px; color: var(--muted); text-decoration: none; font-weight: 500; }
+.back-link:hover { color: var(--primary); }
+.product-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.product-header .muted { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.product-link { color: var(--text); font-weight: 600; text-decoration: none; }
+.product-link:hover { color: var(--primary); text-decoration: underline; }
+.stats.stats-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stat-card.stat-green { border-top-color: var(--green); }
+.stat-text { font-size: 20px; padding-top: 4px; }
+.text-green { color: var(--green); font-weight: 600; }
+.nowrap { white-space: nowrap; }
+.section-gap { margin-top: 20px; }
+
+/* ---------- Add / edit product form ---------- */
+
+.product-form-page { max-width: 960px; }
+.form-section h2 { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.form-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr auto;
-  gap: 12px;
-  align-items: end;
+  grid-template-columns: 1fr 1fr;   /* two columns on desktop */
+  gap: 4px 20px;
 }
-.product-form .field { display: flex; flex-direction: column; min-width: 0; }
-.product-form label { margin-top: 0; }
-.product-form .btn { margin-top: 0; white-space: nowrap; }
+.field { display: flex; flex-direction: column; min-width: 0; margin-bottom: 12px; }
+.field-full { grid-column: 1 / -1; }
+.field label { font-weight: 600; font-size: 13px; margin: 0 0 6px; }
+.req { color: var(--red); }
+.optional { color: var(--muted); font-weight: 400; font-size: 12px; }
+.field .hint { margin: 4px 0 0; }
+.field-error { color: var(--red); font-size: 12px; font-weight: 600; margin: 4px 0 0; }
+.is-invalid { border-color: var(--red) !important; background: #fffafa; }
+.is-invalid:focus { box-shadow: 0 0 0 3px rgba(192, 53, 43, 0.15) !important; }
+.static-value { margin: 0; padding: 9px 0; font-weight: 600; }
+
+.input-prefix { display: flex; align-items: stretch; }
+.input-prefix span {
+  display: grid; place-items: center; padding: 0 11px; color: var(--muted);
+  background: #f3f5f8; border: 1px solid #cdd5e0; border-right: none; border-radius: 8px 0 0 8px;
+}
+.input-prefix input { border-radius: 0 8px 8px 0; }
+
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 32px; }
+.btn-secondary { background: #fff; color: var(--text); border-color: #cdd5e0; }
+.btn-secondary:hover { background: #f3f5f8; }
+.btn:disabled { opacity: 0.6; cursor: wait; }
+
+/* Product detail list */
+.stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.stack > .panel { margin-bottom: 0; }
+.details { display: grid; grid-template-columns: max-content 1fr; gap: 10px 20px; margin: 0; }
+.details dt { color: var(--muted); font-weight: 600; font-size: 13px; }
+.details dd { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.stat-unit { font-size: 14px; font-weight: 500; color: var(--muted); }
 
 /* ---------- Responsive ---------- */
 
+@media (max-width: 640px) {
+  .form-grid { grid-template-columns: 1fr; }   /* one column on phones */
+}
+
 @media (max-width: 1100px) {
   .grid-2 { grid-template-columns: 1fr; }
-  .product-form { grid-template-columns: 1fr 1fr; }
-  .product-form .field-wide { grid-column: 1 / -1; }
 }
 
 @media (max-width: 800px) {
@@ -230,11 +275,13 @@ textarea { resize: vertical; }
   .nav a.active { box-shadow: inset 0 -3px 0 #5b8cff; }
   .sidebar-user { border-top: none; padding: 0; }
   .has-sidebar .content { margin-left: 0; padding: 20px 16px 40px; }
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats, .stats.stats-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 480px) {
   .form .row { grid-template-columns: 1fr; }
-  .product-form { grid-template-columns: 1fr; }
+  .details { grid-template-columns: 1fr; gap: 2px; }
+  .details dd { margin-bottom: 8px; }
+  .form-actions .btn { flex: 1; }
   .stat-value { font-size: 22px; }
 }

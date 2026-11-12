@@ -5,7 +5,7 @@ Run locally:      flask --app app run --debug
 Production:       gunicorn "app:create_app()"   (see Dockerfile)
 
 Setup commands (run from your own computer, never exposed on the web):
-  flask --app app init-db          Create database tables
+  flask --app app db upgrade       Create/upgrade database tables (Flask-Migrate)
   flask --app app create-manager   Create a manager account (prompts for password)
   flask --app app seed-demo        Add sample products (development only)
 """
@@ -16,11 +16,13 @@ from datetime import timedelta
 import click
 from dotenv import load_dotenv
 from flask import Flask, render_template
+from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth import USERNAME_PATTERN, MIN_PASSWORD_LENGTH, auth_bp
 from inventory import inventory_bp
+from products import products_bp
 from models import ROLE_MANAGER, Product, User, db, log_activity
 
 # Read variables from a local .env file (if present) into os.environ.
@@ -28,15 +30,18 @@ from models import ROLE_MANAGER, Product, User, db, log_activity
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 csrf = CSRFProtect()
+# Flask-Migrate keeps the database schema in sync with models.py using
+# versioned migration scripts in the migrations/ folder.
+migrate = Migrate()
 
 SAMPLE_PRODUCTS = [
-    # (sku, name, quantity, reorder_level)
-    ("SF-1001", "Cardboard Shipping Box (Medium)", 240, 50),
-    ("SF-1002", "Packing Tape Roll", 35, 40),
-    ("SF-1003", "Bubble Wrap (50 ft)", 18, 10),
-    ("SF-1004", "Wireless Barcode Label Printer", 4, 5),
-    ("SF-1005", "Pallet Jack", 2, 1),
-    ("SF-1006", "Safety Gloves (Pair)", 0, 20),
+    # (sku, name, category, unit, quantity, reorder_level, location)
+    ("SF-1001", "Cardboard Shipping Box (Medium)", "Packaging Supplies", "Boxes", 240, 50, "Warehouse A, Aisle 1"),
+    ("SF-1002", "Packing Tape Roll", "Packaging Supplies", "Rolls", 35, 40, "Warehouse A, Aisle 1"),
+    ("SF-1003", "Bubble Wrap (50 ft)", "Packaging Supplies", "Rolls", 18, 10, "Warehouse A, Aisle 2"),
+    ("SF-1004", "Wireless Barcode Label Printer", "Electronics", "Pieces", 4, 5, "Office, Cabinet 2"),
+    ("SF-1005", "Pallet Jack", "Other", "Pieces", 2, 1, "Loading Dock"),
+    ("SF-1006", "Safety Gloves", "Clothing", "Pairs", 0, 20, "Warehouse B, Shelf 4"),
 ]
 
 
@@ -88,10 +93,13 @@ def create_app(test_config=None):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
     db.init_app(app)
+    # render_as_batch lets the same migration files also run on SQLite.
+    migrate.init_app(app, db, render_as_batch=True)
     csrf.init_app(app)  # every POST form must include a valid csrf_token
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(inventory_bp)
+    app.register_blueprint(products_bp)
 
     register_error_pages(app)
     register_cli_commands(app)
@@ -119,12 +127,6 @@ def register_error_pages(app):
 
 
 def register_cli_commands(app):
-    @app.cli.command("init-db")
-    def init_db_command():
-        """Create all tables (safe to run again; existing tables are kept)."""
-        db.create_all()
-        click.echo("Database tables are ready.")
-
     @app.cli.command("create-manager")
     @click.option("--username", prompt=True, help="Manager username")
     @click.password_option(help="Manager password (you will be prompted)")
@@ -158,11 +160,14 @@ def register_cli_commands(app):
                 "seed-demo only runs when APP_ENV=development."
             )
         added = 0
-        for sku, name, quantity, reorder_level in SAMPLE_PRODUCTS:
+        for sku, name, category, unit, quantity, reorder_level, location in SAMPLE_PRODUCTS:
             if Product.query.filter_by(sku=sku).first():
                 continue  # never overwrite existing data
             db.session.add(
-                Product(sku=sku, name=name, quantity=quantity, reorder_level=reorder_level)
+                Product(
+                    sku=sku, name=name, category=category, unit=unit, quantity=quantity,
+                    reorder_level=reorder_level, location=location,
+                )
             )
             added += 1
         db.session.commit()

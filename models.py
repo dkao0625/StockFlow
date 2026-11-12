@@ -24,6 +24,14 @@ STATUS_REJECTED = "Rejected"
 
 REQUEST_REASONS = ["Damaged", "Missing"]
 
+PRODUCT_CATEGORIES = ["Packaging Supplies", "Clothing", "Electronics", "Office Supplies", "Other"]
+UNITS_OF_MEASUREMENT = ["Pieces", "Boxes", "Rolls", "Packs", "Pairs", "Other"]
+
+# Inventory status labels (calculated, never stored -- see Product.stock_status)
+STOCK_IN = "In Stock"
+STOCK_LOW = "Low Stock"
+STOCK_OUT = "Out of Stock"
+
 
 def utc_now():
     """Current time in UTC (stored with time zone information)."""
@@ -66,22 +74,64 @@ class Product(db.Model):
         # Python code ever tried to save one.
         db.CheckConstraint("quantity >= 0", name="ck_products_quantity_nonnegative"),
         db.CheckConstraint("reorder_level >= 0", name="ck_products_reorder_nonnegative"),
+        db.CheckConstraint("unit_cost >= 0", name="ck_products_unit_cost_nonnegative"),
+        db.CheckConstraint(
+            "category IN ('Packaging Supplies', 'Clothing', 'Electronics', 'Office Supplies', 'Other')",
+            name="ck_products_category",
+        ),
+        db.CheckConstraint(
+            "unit IN ('Pieces', 'Boxes', 'Rolls', 'Packs', 'Pairs', 'Other')",
+            name="ck_products_unit",
+        ),
     )
 
+    # --- Basic product information ---
     id = db.Column(db.Integer, primary_key=True)
     sku = db.Column(db.String(40), unique=True, nullable=False)
     name = db.Column(db.String(120), nullable=False)
+    # server_default = the value the DATABASE fills in for rows that existed
+    # before this column was added (and for any insert that leaves it out).
+    category = db.Column(db.String(40), nullable=False, default="Other", server_default="Other")
+    description = db.Column(db.String(1000), nullable=True)
+    unit = db.Column(db.String(20), nullable=False, default="Pieces", server_default="Pieces")
+
+    # --- Inventory details ---
     quantity = db.Column(db.Integer, nullable=False, default=0)
     reorder_level = db.Column(db.Integer, nullable=False, default=0)
+    location = db.Column(db.String(100), nullable=True)  # e.g. "Warehouse A, Aisle 3, Shelf B"
+
+    # --- Purchasing information ---
+    supplier = db.Column(db.String(120), nullable=True)
+    # Numeric(10, 2) = exact decimal with 2 digits after the point (like
+    # money), never a float, so 0.10 + 0.20 is exactly 0.30.
+    unit_cost = db.Column(db.Numeric(10, 2), nullable=True)
+
+    # --- Generated automatically ---
+    created_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utc_now,
+        server_default=db.text("CURRENT_TIMESTAMP"),
+    )
+    # onupdate: SQLAlchemy sets this every time the product row is changed
+    # (edits, approvals that subtract stock, stock being added).
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now,
+        server_default=db.text("CURRENT_TIMESTAMP"),
+    )
 
     @property
     def stock_status(self):
-        """In Stock / Low Stock / Out of Stock, based on reorder_level."""
+        """
+        Calculated from quantity and reorder_level every time it's read, so it
+        can never be out of date (that's why there is no status column).
+          quantity == 0                -> Out of Stock
+          0 < quantity <= reorder_level -> Low Stock
+          quantity > reorder_level      -> In Stock
+        """
         if self.quantity == 0:
-            return "Out of Stock"
+            return STOCK_OUT
         if self.quantity <= self.reorder_level:
-            return "Low Stock"
-        return "In Stock"
+            return STOCK_LOW
+        return STOCK_IN
 
 
 class InventoryRequest(db.Model):
@@ -124,9 +174,13 @@ class StockMovement(db.Model):
     )
     quantity_change = db.Column(db.Integer, nullable=False)  # negative = stock removed
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now)
+    # Who made the change and why (e.g. "Delivery from supplier").
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    note = db.Column(db.String(255), nullable=True)
 
     product = db.relationship("Product")
     request = db.relationship("InventoryRequest")
+    actor = db.relationship("User")
 
 
 class ActivityLog(db.Model):

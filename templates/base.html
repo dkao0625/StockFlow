@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}StockFlow{% endblock %} · StockFlow</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body class="{% if g.user %}has-sidebar{% else %}auth-page{% endif %}">
 
@@ -25,7 +26,7 @@
            class="{{ 'active' if endpoint == 'inventory.employee_dashboard' }}">My Dashboard</a>
       {% endif %}
       <a href="{{ url_for('inventory.inventory_list') }}"
-         class="{{ 'active' if endpoint == 'inventory.inventory_list' }}">Inventory</a>
+         class="{{ 'active' if endpoint == 'inventory.inventory_list' or endpoint.startswith('products.') }}">Inventory</a>
     </nav>
 
     <div class="sidebar-user">

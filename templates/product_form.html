@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{#
+  One template for both "Add product" (product is None) and "Edit product".
+  form   = values to show in the inputs (re-filled after a validation error)
+  errors = {field_name: message} shown under the matching field
+#}
+{% set editing = product is not none %}
+{% block title %}{{ 'Edit ' ~ product.name if editing else 'Add product' }}{% endblock %}
+
+{% macro field_error(name) -%}
+  {% if errors.get(name) %}<p class="field-error" id="{{ name }}-error">{{ errors[name] }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro invalid(name) -%}
+  {% if errors.get(name) %}class="is-invalid" aria-invalid="true" aria-describedby="{{ name }}-error"{% endif %}
+{%- endmacro %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('products.detail', product_id=product.id) if editing else url_for('inventory.inventory_list') }}">
+  ← {{ 'Back to product' if editing else 'All inventory' }}
+</a>
+
+<header class="page-header">
+  <h1>{{ 'Edit product' if editing else 'Add a product' }}</h1>
+  <p class="muted">Fields marked <span class="req">*</span> are required.
+    {% if editing %}Stock quantity is changed with <strong>Add stock</strong> on the product page, so every change is recorded.{% endif %}
+  </p>
+</header>
+
+<form method="post" class="product-form-page" data-submit-once novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <!-- 1. Basic product information -->
+  <section class="panel form-section">
+    <h2>Basic product information</h2>
+    <div class="form-grid">
+      <div class="field">
+        <label for="name">Product name <span class="req">*</span></label>
+        <input id="name" name="name" maxlength="120" value="{{ form.name }}" required
+               placeholder="e.g. Stretch Wrap Film (18 in)" {{ invalid('name') }}>
+        {{ field_error('name') }}
+      </div>
+
+      <div class="field">
+        <label for="sku">SKU <span class="req">*</span></label>
+        <input id="sku" name="sku" maxlength="40" value="{{ form.sku }}" required
+               placeholder="e.g. SF-2001" {{ invalid('sku') }}>
+        <p class="hint">Unique code: letters, numbers, and dashes. Saved in capitals.</p>
+        {{ field_error('sku') }}
+      </div>
+
+      <div class="field">
+        <label for="category">Category <span class="req">*</span></label>
+        <select id="category" name="category" required {{ invalid('category') }}>
+          <option value="">Choose a category…</option>
+          {% for category in categories %}
+            <option value="{{ category }}" {{ 'selected' if form.category == category }}>{{ category }}</option>
+          {% endfor %}
+        </select>
+        {{ field_error('category') }}
+      </div>
+
+      <div class="field">
+        <label for="unit">Unit of measurement <span class="req">*</span></label>
+        <select id="unit" name="unit" required {{ invalid('unit') }}>
+          {% for unit in units %}
+            <option value="{{ unit }}" {{ 'selected' if form.unit == unit }}>{{ unit }}</option>
+          {% endfor %}
+        </select>
+        <p class="hint">How this product is counted.</p>
+        {{ field_error('unit') }}
+      </div>
+
+      <div class="field field-full">
+        <label for="description">Description <span class="optional">(optional)</span></label>
+        <textarea id="description" name="description" rows="3" maxlength="1000"
+                  placeholder="Size, color, model number, or anything that helps identify it"
+                  {{ invalid('description') }}>{{ form.description }}</textarea>
+        {{ field_error('description') }}
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Inventory details -->
+  <section class="panel form-section">
+    <h2>Inventory details</h2>
+    <div class="form-grid">
+      {% if not editing %}
+        <div class="field">
+          <label for="quantity">Starting quantity <span class="req">*</span></label>
+          <input id="quantity" name="quantity" type="number" min="0" step="1" inputmode="numeric"
+                 value="{{ form.quantity }}" required {{ invalid('quantity') }}>
+          <p class="hint">How many you have right now.</p>
+          {{ field_error('quantity') }}
+        </div>
+      {% else %}
+        <div class="field">
+          <label>Current quantity</label>
+          <p class="static-value">{{ product.quantity }} {{ product.unit|lower }}</p>
+        </div>
+      {% endif %}
+
+      <div class="field">
+        <label for="reorder_level">Reorder level <span class="req">*</span></label>
+        <input id="reorder_level" name="reorder_level" type="number" min="0" step="1" inputmode="numeric"
+               value="{{ form.reorder_level }}" required {{ invalid('reorder_level') }}>
+        <p class="hint">At or below this amount the product shows as <strong>Low Stock</strong>.</p>
+        {{ field_error('reorder_level') }}
+      </div>
+
+      <div class="field field-full">
+        <label for="location">Storage location <span class="optional">(optional)</span></label>
+        <input id="location" name="location" maxlength="100" value="{{ form.location }}"
+               placeholder="e.g. Warehouse A · Aisle 3 · Shelf B" {{ invalid('location') }}>
+        {{ field_error('location') }}
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Purchasing information -->
+  <section class="panel form-section">
+    <h2>Purchasing information</h2>
+    <div class="form-grid">
+      <div class="field">
+        <label for="supplier">Supplier name <span class="optional">(optional)</span></label>
+        <input id="supplier" name="supplier" maxlength="120" value="{{ form.supplier }}"
+               placeholder="e.g. Pacific Packaging Co." {{ invalid('supplier') }}>
+        {{ field_error('supplier') }}
+      </div>
+
+      {% if g.user.is_manager %}
+      {# Unit cost is manager-only; the server also ignores it from employees. #}
+      <div class="field">
+        <label for="unit_cost">Unit cost (USD) <span class="optional">(optional)</span></label>
+        <div class="input-prefix">
+          <span>$</span>
+          <input id="unit_cost" name="unit_cost" inputmode="decimal" value="{{ form.unit_cost }}"
+                 placeholder="0.00" {{ invalid('unit_cost') }}>
+        </div>
+        <p class="hint">Cost per unit. Only managers can see this.</p>
+        {{ field_error('unit_cost') }}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <a class="btn btn-secondary" href="{{ url_for('inventory.inventory_list') }}">Cancel</a>
+    <button type="submit" class="btn btn-primary" data-busy-text="Saving…">
+      {{ 'Save changes' if editing else 'Add product' }}
+    </button>
+  </div>
+</form>
+{% endblock %}
