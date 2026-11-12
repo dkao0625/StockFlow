@@ -21,8 +21,17 @@ VALID_PRODUCT = {
 }
 
 
-def add(client, **changes):
-    return client.post("/products/new", data={**VALID_PRODUCT, **changes})
+def add(client, drop=(), **changes):
+    """Post the add-product form. drop=("unit_cost",) leaves fields out."""
+    data = {**VALID_PRODUCT, **changes}
+    for field in drop:
+        data.pop(field)
+    return client.post("/products/new", data=data)
+
+
+def employee_add(client, **changes):
+    # The employee form has no unit cost field, so a real browser never sends it.
+    return add(client, drop=("unit_cost",), **changes)
 
 
 def count_products(app):
@@ -139,10 +148,9 @@ def test_employee_can_create_product(app, client):
     login(client, "alice")
     assert "+ Add product" in client.get("/inventory").get_data(as_text=True)
     form_page = client.get("/products/new").get_data(as_text=True)
-    assert form_page and 'name="unit_cost"' not in form_page  # cost field hidden
+    assert 'name="unit_cost"' not in form_page  # cost field hidden
 
-    # Even if an employee sends a unit cost anyway, it is ignored.
-    response = add(client, unit_cost="99.99")
+    response = employee_add(client)
     assert response.status_code == 302
     with app.app_context():
         product = Product.query.filter_by(sku="SF-2001").one()
@@ -152,10 +160,17 @@ def test_employee_can_create_product(app, client):
         assert movement.actor.username == "alice" and movement.note == "Starting stock"
 
 
+def test_employee_cannot_set_unit_cost(app, client):
+    # A hand-crafted request that sneaks in unit_cost is refused outright.
+    login(client, "alice")
+    assert add(client, unit_cost="99.99").status_code == 403
+    assert count_products(app) == 2
+
+
 def test_employee_invalid_input_still_rejected(app, client):
     login(client, "alice")
-    assert add(client, quantity="-1").status_code == 400
-    assert add(client, sku="T-1").status_code == 400  # duplicate SKU
+    assert employee_add(client, quantity="-1").status_code == 400
+    assert employee_add(client, sku="T-1").status_code == 400  # duplicate SKU
     assert count_products(app) == 2
 
 
@@ -173,9 +188,10 @@ def test_manager_edits_product_without_changing_stock(app, client):
     login(client, "boss")
     assert client.get(f"/products/{pid}/edit").status_code == 200
 
+    edit_form = {k: v for k, v in VALID_PRODUCT.items() if k != "quantity"}
     response = client.post(
         f"/products/{pid}/edit",
-        data={**VALID_PRODUCT, "sku": "T-1", "name": "Widget Pro", "quantity": "9999"},
+        data={**edit_form, "sku": "T-1", "name": "Widget Pro"},
     )
     assert response.status_code == 302
     with app.app_context():
@@ -183,24 +199,58 @@ def test_manager_edits_product_without_changing_stock(app, client):
         assert product.name == "Widget Pro"
         assert product.category == "Packaging Supplies"
         assert product.quantity == 10  # quantity is NOT editable here
+        assert product.reorder_level == 5 and product.unit_cost == Decimal("12.50")
         assert product.updated_at >= product.created_at
 
 
 def test_edit_rejects_another_products_sku(app, client):
     login(client, "boss")
     response = client.post(
-        f"/products/{product_id(app, 'T-1')}/edit", data={**VALID_PRODUCT, "sku": "T-2"}
+        f"/products/{product_id(app, 'T-1')}/edit",
+        data={**{k: v for k, v in VALID_PRODUCT.items() if k != "quantity"}, "sku": "T-2"},
     )
     assert response.status_code == 400
 
 
-def test_employee_cannot_edit_product(app, client):
+EMPLOYEE_EDIT = {k: v for k, v in VALID_PRODUCT.items() if k not in ("quantity", "reorder_level", "unit_cost")}
+
+
+def test_employee_edits_one_product(app, client):
     pid = product_id(app, "T-1")
     login(client, "alice")
-    assert client.get(f"/products/{pid}/edit").status_code == 403
-    assert client.post(f"/products/{pid}/edit", data={**VALID_PRODUCT, "sku": "T-1"}).status_code == 403
+    page = client.get(f"/products/{pid}/edit").get_data(as_text=True)
+    assert 'name="reorder_level"' not in page and 'name="unit_cost"' not in page
+
+    response = client.post(
+        f"/products/{pid}/edit", data={**EMPLOYEE_EDIT, "sku": "T-1", "location": "Aisle 9"}
+    )
+    assert response.status_code == 302
     with app.app_context():
-        assert db.session.get(Product, pid).name == "Widget"
+        product = db.session.get(Product, pid)
+        assert product.name == "Stretch Wrap Film" and product.location == "Aisle 9"
+        assert product.quantity == 10 and product.reorder_level == 3  # untouched
+        log = ActivityLog.query.filter_by(product_id=pid).one()
+        assert log.actor.username == "alice" and "location" in log.action
+
+
+@pytest.mark.parametrize("field, value", [("quantity", "500"), ("reorder_level", "1"), ("unit_cost", "5")])
+def test_employee_edit_cannot_touch_restricted_fields(app, client, field, value):
+    pid = product_id(app, "T-1")
+    login(client, "alice")
+    response = client.post(f"/products/{pid}/edit", data={**EMPLOYEE_EDIT, "sku": "T-1", field: value})
+    assert response.status_code == 403
+    with app.app_context():
+        product = db.session.get(Product, pid)
+        assert product.quantity == 10 and product.reorder_level == 3 and product.name == "Widget"
+
+
+def test_manager_edit_cannot_change_quantity(app, client):
+    pid = product_id(app, "T-1")
+    login(client, "boss")
+    response = client.post(f"/products/{pid}/edit", data={**VALID_PRODUCT, "sku": "T-1", "quantity": "9999"})
+    assert response.status_code == 403
+    with app.app_context():
+        assert db.session.get(Product, pid).quantity == 10
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +275,8 @@ def test_unit_cost_hidden_from_employees(app, client):
     page = client.get(f"/products/{product_id(app, 'SF-2001')}").get_data(as_text=True)
     assert "Pacific Packaging Co." in page  # supplier is visible
     assert "$12.50" not in page and "Unit cost" not in page
-    assert "Edit product" not in page and "Add to stock" not in page
+    assert "Add to stock" not in page  # employees can't add stock directly
+    assert "Edit product" in page      # but they can edit basic details
 
 
 def test_inventory_table_shows_new_columns(app, client):

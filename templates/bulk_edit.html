@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "_macros.html" import selection_fields, selected_list %}
+{% block title %}Bulk edit{% endblock %}
+
+{% macro toggle(field, label) -%}
+  {# "Update this field" switch. Only switched-on fields are changed. #}
+  <label class="toggle">
+    <input type="checkbox" name="update_{{ field }}" value="1" data-toggle-field="{{ field }}"
+           {{ 'checked' if form.get('update_' ~ field) }}>
+    <span>{{ label }}</span>
+  </label>
+{%- endmacro %}
+
+{% macro error(field) -%}
+  {% if errors.get(field) %}<p class="field-error" id="{{ field }}-error">{{ errors[field] }}</p>{% endif %}
+{%- endmacro %}
+
+{% block content %}
+<a class="back-link" href="{{ next_url }}">← Back to inventory</a>
+<header class="page-header">
+  <h1>Bulk edit</h1>
+  <p class="muted">Switch on the fields you want to change. Everything else on these products stays the same.</p>
+</header>
+
+<form method="post" class="product-form-page" data-submit-once>
+  {{ selection_fields(products, next_url) }}
+
+  <section class="panel form-section">
+    <div class="affected">
+      <strong>{{ products|length }} product{{ 's' if products|length != 1 }} will be affected.</strong>
+      {{ selected_list(products) }}
+    </div>
+
+    <div class="bulk-fields">
+      {% if 'category' in fields %}
+        <div class="bulk-field">
+          {{ toggle('category', 'Update category') }}
+          <select name="category" aria-label="New category" data-field-input="category">
+            <option value="">Choose a category…</option>
+            {% for category in categories %}
+              <option value="{{ category }}" {{ 'selected' if form.get('category') == category }}>{{ category }}</option>
+            {% endfor %}
+          </select>
+          {{ error('category') }}
+        </div>
+      {% endif %}
+
+      {% if 'unit' in fields %}
+        <div class="bulk-field">
+          {{ toggle('unit', 'Update unit of measurement') }}
+          <select name="unit" aria-label="New unit" data-field-input="unit">
+            <option value="">Choose a unit…</option>
+            {% for unit in units %}
+              <option value="{{ unit }}" {{ 'selected' if form.get('unit') == unit }}>{{ unit }}</option>
+            {% endfor %}
+          </select>
+          {{ error('unit') }}
+        </div>
+      {% endif %}
+
+      {% if 'location' in fields %}
+        <div class="bulk-field">
+          {{ toggle('location', 'Update storage location') }}
+          <input name="location" maxlength="100" value="{{ form.get('location', '') }}"
+                 placeholder="e.g. Warehouse B · Aisle 2 (leave blank to clear)" aria-label="New storage location"
+                 data-field-input="location">
+          {{ error('location') }}
+        </div>
+      {% endif %}
+
+      {% if 'supplier' in fields %}
+        <div class="bulk-field">
+          {{ toggle('supplier', 'Update supplier name') }}
+          <input name="supplier" maxlength="120" value="{{ form.get('supplier', '') }}"
+                 placeholder="e.g. Pacific Packaging Co. (leave blank to clear)" aria-label="New supplier"
+                 data-field-input="supplier">
+          {{ error('supplier') }}
+        </div>
+      {% endif %}
+
+      {% if 'reorder_level' in fields %}
+        {# Managers only. The server rejects this field from employees. #}
+        <div class="bulk-field">
+          {{ toggle('reorder_level', 'Update reorder level') }}
+          <input name="reorder_level" type="number" min="0" step="1" value="{{ form.get('reorder_level', '') }}"
+                 aria-label="New reorder level" data-field-input="reorder_level">
+          {{ error('reorder_level') }}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <a class="btn btn-secondary" href="{{ next_url }}">Cancel</a>
+    <button type="submit" class="btn btn-primary" data-busy-text="Saving…">
+      Update {{ products|length }} product{{ 's' if products|length != 1 }}
+    </button>
+  </div>
+</form>
+{% endblock %}

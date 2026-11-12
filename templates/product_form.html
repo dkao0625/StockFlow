@@ -16,9 +16,7 @@
 {%- endmacro %}
 
 {% block content %}
-<a class="back-link" href="{{ url_for('products.detail', product_id=product.id) if editing else url_for('inventory.inventory_list') }}">
-  ← {{ 'Back to product' if editing else 'All inventory' }}
-</a>
+<a class="back-link" href="{{ next_url }}">← Back</a>
 
 <header class="page-header">
   <h1>{{ 'Edit product' if editing else 'Add a product' }}</h1>
@@ -29,6 +27,7 @@
 
 <form method="post" class="product-form-page" data-submit-once novalidate>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
 
   <!-- 1. Basic product information -->
   <section class="panel form-section">
@@ -100,6 +99,8 @@
         </div>
       {% endif %}
 
+      {# On an existing product only managers change the reorder level. #}
+      {% if not editing or g.user.is_manager %}
       <div class="field">
         <label for="reorder_level">Reorder level <span class="req">*</span></label>
         <input id="reorder_level" name="reorder_level" type="number" min="0" step="1" inputmode="numeric"
@@ -107,6 +108,12 @@
         <p class="hint">At or below this amount the product shows as <strong>Low Stock</strong>.</p>
         {{ field_error('reorder_level') }}
       </div>
+      {% else %}
+      <div class="field">
+        <label>Reorder level</label>
+        <p class="static-value">{{ product.reorder_level }} <span class="optional">(managers can change this)</span></p>
+      </div>
+      {% endif %}
 
       <div class="field field-full">
         <label for="location">Storage location <span class="optional">(optional)</span></label>
@@ -145,7 +152,7 @@
   </section>
 
   <div class="form-actions">
-    <a class="btn btn-secondary" href="{{ url_for('inventory.inventory_list') }}">Cancel</a>
+    <a class="btn btn-secondary" href="{{ next_url }}">Cancel</a>
     <button type="submit" class="btn btn-primary" data-busy-text="Saving…">
       {{ 'Save changes' if editing else 'Add product' }}
     </button>

@@ -1,40 +1,72 @@
 {% extends "base.html" %}
 {% from "_macros.html" import request_badge, stat_cards, date %}
 {% block title %}Requests{% endblock %}
+
+{% macro request_cell(req) -%}
+  {% if req.is_archive %}
+    <span class="badge badge-red">Archive product</span>
+  {% else %}
+    {{ req.reason }}
+    <strong class="{{ 'text-green' if req.signed_quantity > 0 else 'text-red' }}">{{ '%+d'|format(req.signed_quantity) }}</strong>
+  {% endif %}
+{%- endmacro %}
+
 {% block content %}
 <header class="page-header">
   <h1>Inventory requests</h1>
-  <p class="muted">Review damage and missing-item reports from employees.</p>
+  <p class="muted">Review stock adjustments, damage reports, and deletion requests from employees.</p>
 </header>
 
 {{ stat_cards(stats) }}
 
-<section class="panel">
+<section class="panel" data-bulk data-bulk-always>
   <h2>Pending review <span class="count">{{ pending_requests|length }}</span></h2>
+
+  {% if pending_requests %}
+    {#
+      Bulk review form. The row checkboxes below belong to it through
+      form="bulk-review" (HTML forms can't be nested inside the rows' forms).
+      All selected requests are approved or rejected in ONE transaction.
+    #}
+    <form method="post" id="bulk-review" action="{{ url_for('inventory.bulk_decision') }}"
+          class="bulk-toolbar review-toolbar" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <strong><span data-selected-count>0</span> selected</strong>
+      <span class="toolbar-divider"></span>
+      <input name="manager_note" maxlength="500" placeholder="Note for all selected (required to reject)"
+             aria-label="Note for selected requests">
+      <button type="submit" name="decision" value="approve" class="btn btn-green" data-bulk-action disabled>Approve selected</button>
+      <button type="submit" name="decision" value="reject" class="btn btn-red" data-bulk-action disabled>Reject selected</button>
+    </form>
+  {% endif %}
+
   <div class="table-wrap">
-    <table>
+    <table class="selectable">
       <thead>
         <tr>
+          <th class="select-col"><input type="checkbox" data-select-all aria-label="Select all pending requests"></th>
           <th>#</th>
           <th>Employee</th>
           <th>Product</th>
-          <th>Type</th>
-          <th class="num">Qty</th>
+          <th>Request</th>
           <th class="num">In stock</th>
-          <th>Reason</th>
+          <th>Explanation</th>
           <th>Decision</th>
         </tr>
       </thead>
       <tbody>
         {% for req in pending_requests %}
           <tr>
+            <td class="select-col">
+              <input type="checkbox" name="request_ids" value="{{ req.id }}" form="bulk-review"
+                     data-select-item aria-label="Select request {{ req.id }}">
+            </td>
             <td class="mono">{{ req.id }}</td>
             <td>{{ req.employee.username }}<div class="sub">{{ date(req.created_at) }}</div></td>
             <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a><div class="sub mono">{{ req.product.sku }}</div></td>
-            <td>{{ req.reason }}</td>
-            <td class="num">{{ req.quantity }}</td>
-            <td class="num {{ 'text-red' if req.product.quantity < req.quantity }}">{{ req.product.quantity }}</td>
-            <td class="reason">{{ req.notes }}</td>
+            <td>{{ request_cell(req) }}</td>
+            <td class="num {{ 'text-red' if not req.is_archive and req.product.quantity + req.signed_quantity < 0 }}">{{ req.product.quantity }}</td>
+            <td class="reason">{{ req.notes or '—' }}</td>
             <td>
               {# One form, two buttons: each button posts to a different URL. #}
               <form method="post" class="decision-form">
@@ -67,8 +99,7 @@
           <th>#</th>
           <th>Employee</th>
           <th>Product</th>
-          <th>Type</th>
-          <th class="num">Qty</th>
+          <th>Request</th>
           <th>Status</th>
           <th>Reviewed by</th>
           <th>Manager note</th>
@@ -80,14 +111,13 @@
             <td class="mono">{{ req.id }}</td>
             <td>{{ req.employee.username }}<div class="sub">{{ date(req.created_at) }}</div></td>
             <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a></td>
-            <td>{{ req.reason }}</td>
-            <td class="num">{{ req.quantity }}</td>
+            <td>{{ request_cell(req) }}</td>
             <td>{{ request_badge(req.status) }}</td>
             <td>{{ req.manager.username if req.manager else '—' }}</td>
             <td>{{ req.manager_note or '—' }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="8" class="empty">No reviewed requests yet.</td></tr>
+          <tr><td colspan="7" class="empty">No reviewed requests yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

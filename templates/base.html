@@ -26,7 +26,11 @@
            class="{{ 'active' if endpoint == 'inventory.employee_dashboard' }}">My Dashboard</a>
       {% endif %}
       <a href="{{ url_for('inventory.inventory_list') }}"
-         class="{{ 'active' if endpoint == 'inventory.inventory_list' or endpoint.startswith('products.') }}">Inventory</a>
+         class="{{ 'active' if endpoint == 'inventory.inventory_list' or endpoint.startswith('products.') or endpoint.startswith('bulk.') }}">Inventory</a>
+      {% if g.user.is_manager %}
+        <a href="{{ url_for('inventory.activity') }}"
+           class="{{ 'active' if endpoint == 'inventory.activity' }}">Activity</a>
+      {% endif %}
     </nav>
 
     <div class="sidebar-user">

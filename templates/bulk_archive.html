@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_macros.html" import selection_fields %}
+{% block title %}{{ 'Archive products' if g.user.is_manager else 'Request deletion' }}{% endblock %}
+{% block content %}
+{% set count = products|length %}
+{% set plural = 's' if count != 1 else '' %}
+{% set allowed_count = count - blockers|length %}
+<a class="back-link" href="{{ next_url }}">← Back to inventory</a>
+
+<div class="confirm-box panel">
+  <h1>
+    {% if g.user.is_manager %}Archive {{ count }} product{{ plural }}?
+    {% else %}Are you sure you want to request deletion of {{ count }} selected product{{ plural }}?{% endif %}
+  </h1>
+  <p class="muted">
+    Products are <strong>archived, not permanently deleted</strong>. They disappear from the active
+    inventory, but their requests and stock history are kept.
+    {% if not g.user.is_manager %}A manager must approve your request first.{% endif %}
+  </p>
+
+  <table class="confirm-table">
+    <thead><tr><th>Product</th><th class="num">In stock</th><th>Can archive?</th></tr></thead>
+    <tbody>
+      {% for product in products %}
+        <tr>
+          <td>{{ product.name }} <span class="sub mono">{{ product.sku }}</span></td>
+          <td class="num">{{ product.quantity }}</td>
+          <td>
+            {% if blockers.get(product.id) %}
+              <span class="badge badge-red">Blocked</span> <span class="sub">It {{ blockers[product.id] }}.</span>
+            {% else %}
+              <span class="badge badge-green">Yes</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if blockers %}
+    <div class="flash flash-warning">
+      {{ blockers|length }} of {{ count }} product{{ plural }} can't be archived right now.
+      Go back and unselect {{ 'it' if blockers|length == 1 else 'them' }}{% if g.user.is_manager %}, or review the pending requests first{% endif %}.
+    </div>
+  {% else %}
+    <form method="post" class="form" data-submit-once>
+      {{ selection_fields(products, next_url) }}
+      <label for="note">Reason <span class="optional">(optional)</span></label>
+      <textarea id="note" name="note" rows="2" maxlength="500"
+                placeholder="e.g. Discontinued by supplier"></textarea>
+
+      {% if g.user.is_manager %}
+        {# Extra confirmation for managers, because this takes effect immediately. #}
+        <label class="toggle danger-confirm">
+          <input type="checkbox" name="acknowledge" value="yes" required>
+          <span>Yes, archive these {{ count }} product{{ plural }} now.</span>
+        </label>
+      {% endif %}
+
+      <div class="form-actions">
+        <a class="btn btn-secondary" href="{{ next_url }}">Cancel</a>
+        <button type="submit" class="btn btn-danger" data-busy-text="Working…"
+                data-confirm="{{ 'Archive ' ~ count ~ ' product' ~ plural ~ '? They will be hidden from active inventory.' if g.user.is_manager else 'Are you sure you want to request deletion of ' ~ count ~ ' selected product' ~ plural ~ '?' }}">
+          {{ 'Archive ' ~ count ~ ' product' ~ plural if g.user.is_manager else 'Request deletion' }}
+        </button>
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -23,6 +23,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from auth import USERNAME_PATTERN, MIN_PASSWORD_LENGTH, auth_bp
 from inventory import inventory_bp
 from products import products_bp
+from bulk import bulk_bp
 from models import ROLE_MANAGER, Product, User, db, log_activity
 
 # Read variables from a local .env file (if present) into os.environ.
@@ -100,6 +101,7 @@ def create_app(test_config=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(inventory_bp)
     app.register_blueprint(products_bp)
+    app.register_blueprint(bulk_bp)
 
     register_error_pages(app)
     register_cli_commands(app)

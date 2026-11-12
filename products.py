@@ -3,12 +3,13 @@ Product pages.
 
   /products/new             Add a product            (employees and managers)
   /products/<id>            Product details          (everyone logged in)
-  /products/<id>/edit       Edit product details     (managers only)
+  /products/<id>/edit       Edit product details     (employees: basic fields;
+                                                       managers: also reorder level + cost)
   /products/<id>/restock    Add stock                (managers only)
 
-Product creation is kept separate from inventory adjustment requests:
-employees can add NEW products, but can't edit products or add stock to
-existing ones. They use damage/missing reports
+Product editing never changes stock quantity. Quantity only changes through
+stock movements (manager "Add stock", or approved requests), so the stock
+history always adds up. They use damage/missing reports
 instead, which a manager must approve (see inventory.py).
 """
 
@@ -22,16 +23,17 @@ from auth import login_required, manager_required
 from models import (
     PRODUCT_CATEGORIES,
     UNITS_OF_MEASUREMENT,
+    ActivityLog,
     InventoryRequest,
     Product,
     StockMovement,
     db,
     log_activity,
 )
+from stock import MAX_STOCK_QUANTITY, StockError, change_stock, lock_products
 
 products_bp = Blueprint("products", __name__, url_prefix="/products")
 
-MAX_STOCK_QUANTITY = 1_000_000
 MAX_RESTOCK_QUANTITY = 100_000
 MAX_UNIT_COST = Decimal("99999999.99")  # largest value NUMERIC(10, 2) can hold
 SKU_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,39}$")
@@ -43,6 +45,40 @@ PRODUCT_FORM_FIELDS = [
     "name", "sku", "category", "description", "unit",
     "quantity", "reorder_level", "location", "supplier", "unit_cost",
 ]
+
+# Who may set which fields. Checked on the server for every save.
+EMPLOYEE_EDIT_FIELDS = {"name", "sku", "category", "description", "unit", "location", "supplier"}
+MANAGER_ONLY_FIELDS = {"reorder_level", "unit_cost"}
+
+
+def allowed_product_fields(user, creating):
+    """The product form fields this user may submit."""
+    fields = set(EMPLOYEE_EDIT_FIELDS)
+    if creating:
+        # Everyone sets starting quantity and reorder level on a NEW product.
+        fields |= {"quantity", "reorder_level"}
+    if user.is_manager:
+        fields |= MANAGER_ONLY_FIELDS
+    return fields
+
+
+def reject_forbidden_fields(form, allowed_fields):
+    """
+    403 if the request contains a product field this user may not change.
+    The page never shows those inputs, so this only happens when someone
+    hand-crafts a request to get around the form.
+    """
+    sent_fields = {field for field in PRODUCT_FORM_FIELDS if field in form}
+    if sent_fields - allowed_fields:
+        abort(403)
+
+
+def safe_next_url(default):
+    """Where to go after saving/cancel: ?next=/inventory?... (only paths on this site)."""
+    next_url = request.values.get("next", "")
+    if next_url.startswith("/") and not next_url.startswith("//") and "\\" not in next_url:
+        return next_url
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +121,7 @@ def parse_unit_cost(text):
     return amount.quantize(Decimal("0.01")), None
 
 
-def validate_product_form(form, existing_product=None):
+def validate_product_form(form, allowed_fields, existing_product=None):
     """
     Check every field of the add/edit product form ON THE SERVER.
 
@@ -94,9 +130,9 @@ def validate_product_form(form, existing_product=None):
       cleaned     -- validated values, ready to save
       errors      -- {field_name: message} shown next to each bad field
 
-    existing_product is given when editing; starting quantity is then
-    skipped (stock only changes through stock movements) and the product's
-    own SKU doesn't count as a duplicate.
+    Only fields in allowed_fields are checked and returned in cleaned.
+    existing_product is given when editing; the product's own SKU then
+    doesn't count as a duplicate.
     """
     form_values = {field: form.get(field, "").strip() for field in PRODUCT_FORM_FIELDS}
     form_values["sku"] = form_values["sku"].upper()
@@ -130,29 +166,25 @@ def validate_product_form(form, existing_product=None):
         errors["unit"] = "Choose a unit of measurement from the list."
     cleaned["unit"] = form_values["unit"]
 
-    # Numbers
-    if existing_product is None:
+    # Numbers (only the ones this user may set)
+    if "quantity" in allowed_fields:
         cleaned["quantity"], error = parse_whole_number(
             form_values["quantity"], "Starting quantity", MAX_STOCK_QUANTITY
         )
         if error:
             errors["quantity"] = error
 
-    cleaned["reorder_level"], error = parse_whole_number(
-        form_values["reorder_level"], "Reorder level", MAX_STOCK_QUANTITY
-    )
-    if error:
-        errors["reorder_level"] = error
+    if "reorder_level" in allowed_fields:
+        cleaned["reorder_level"], error = parse_whole_number(
+            form_values["reorder_level"], "Reorder level", MAX_STOCK_QUANTITY
+        )
+        if error:
+            errors["reorder_level"] = error
 
-    # Unit cost is manager-only information. If an employee sends one anyway
-    # (the field is hidden from them), it is ignored rather than saved.
-    if g.user.is_manager:
+    if "unit_cost" in allowed_fields:  # managers only
         cleaned["unit_cost"], error = parse_unit_cost(form_values["unit_cost"])
         if error:
             errors["unit_cost"] = error
-    else:
-        form_values["unit_cost"] = ""
-        cleaned["unit_cost"] = None
 
     # Optional text fields: empty text is saved as NULL (no value)
     for field in ["description", "location", "supplier"]:
@@ -167,6 +199,7 @@ def validate_product_form(form, existing_product=None):
 
 
 def render_product_form(product, form_values, errors, status_code=200):
+    default_back = url_for("products.detail", product_id=product.id) if product else url_for("inventory.inventory_list")
     return render_template(
         "product_form.html",
         product=product,  # None when adding a new product
@@ -174,6 +207,7 @@ def render_product_form(product, form_values, errors, status_code=200):
         errors=errors,
         categories=PRODUCT_CATEGORIES,
         units=UNITS_OF_MEASUREMENT,
+        next_url=safe_next_url(default_back),
     ), status_code
 
 
@@ -195,7 +229,9 @@ def new_product():
         empty_form = {"category": "", "unit": "Pieces", "quantity": "0", "reorder_level": "0"}
         return render_product_form(None, empty_form, {})
 
-    form_values, cleaned, errors = validate_product_form(request.form)
+    allowed_fields = allowed_product_fields(g.user, creating=True)
+    reject_forbidden_fields(request.form, allowed_fields)
+    form_values, cleaned, errors = validate_product_form(request.form, allowed_fields)
     if errors:
         flash("Please fix the highlighted fields below.", "error")
         return render_product_form(None, form_values, errors, status_code=400)
@@ -216,7 +252,11 @@ def new_product():
                 note="Starting stock",
             )
         )
-    log_activity(g.user.id, f"Added product {product.sku} ({product.name}) with {product.quantity} {product.unit.lower()}")
+    log_activity(
+        g.user.id,
+        f"Added product {product.sku} ({product.name}) with {product.quantity} {product.unit.lower()}",
+        product.id,
+    )
 
     try:
         db.session.commit()
@@ -253,18 +293,34 @@ def detail(product_id):
         InventoryRequest.created_at.desc(), InventoryRequest.id.desc()
     ).all()
 
+    # Who changed what on this product (managers only).
+    change_history = []
+    if g.user.is_manager:
+        change_history = (
+            ActivityLog.query.filter_by(product_id=product.id)
+            .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+            .limit(100)
+            .all()
+        )
+
     return render_template(
         "product.html",
         product=product,
         stock_history=stock_history,
         product_requests=product_requests,
+        change_history=change_history,
     )
 
 
 @products_bp.route("/<int:product_id>/edit", methods=["GET", "POST"])
-@manager_required
+@login_required  # employees edit basic fields; managers also reorder level + cost
 def edit(product_id):
     product = get_product_or_404(product_id)
+    if product.is_archived:
+        flash("Archived products can't be edited.", "error")
+        return redirect(url_for("products.detail", product_id=product.id))
+
+    allowed_fields = allowed_product_fields(g.user, creating=False)
 
     if request.method == "GET":
         current_values = {
@@ -273,16 +329,21 @@ def edit(product_id):
         }
         return render_product_form(product, current_values, {})
 
-    form_values, cleaned, errors = validate_product_form(request.form, existing_product=product)
+    reject_forbidden_fields(request.form, allowed_fields)
+    form_values, cleaned, errors = validate_product_form(
+        request.form, allowed_fields, existing_product=product
+    )
     if errors:
         flash("Please fix the highlighted fields below.", "error")
         return render_product_form(product, form_values, errors, status_code=400)
 
-    # Quantity is NOT edited here: stock changes go through "Add stock" or
-    # approved reports, so every change is recorded in the stock history.
+    # Record exactly which fields changed, e.g. "location: 'A1' -> 'B2'".
+    # Quantity is never in `cleaned` here, so stock can't change.
+    changes = describe_changes(product, cleaned)
     for field, value in cleaned.items():
         setattr(product, field, value)  # updated_at is set automatically
-    log_activity(g.user.id, f"Edited product {product.sku}")
+    if changes:
+        log_activity(g.user.id, f"Edited {product.sku}: {changes}", product.id)
 
     try:
         db.session.commit()
@@ -292,8 +353,21 @@ def edit(product_id):
         flash("Please fix the highlighted fields below.", "error")
         return render_product_form(product, form_values, errors, status_code=400)
 
-    flash(f"Changes saved for {product.name}.", "success")
-    return redirect(url_for("products.detail", product_id=product.id))
+    flash(f"Changes saved for {product.name}." if changes else "No changes to save.", "success")
+    return redirect(safe_next_url(url_for("products.detail", product_id=product.id)))
+
+
+def describe_changes(product, new_values):
+    """Text listing the fields whose value is different, for the activity log."""
+    def show(value):
+        return "(empty)" if value is None or value == "" else f"'{value}'"
+
+    parts = []
+    for field, new_value in new_values.items():
+        old_value = getattr(product, field)
+        if old_value != new_value:
+            parts.append(f"{field}: {show(old_value)} -> {show(new_value)}")
+    return "; ".join(parts)
 
 
 @products_bp.route("/<int:product_id>/restock", methods=["POST"])
@@ -315,34 +389,18 @@ def restock(product_id):
         # Lock the product row (SELECT ... FOR UPDATE) so a restock and an
         # approval happening at the same moment can't overwrite each other.
         # Without the lock, both could read 10, and one change would be lost.
-        product = db.session.execute(
-            db.select(Product)
-            .where(Product.id == product_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        ).scalar_one_or_none()
+        product = lock_products([product_id]).get(product_id)
         if product is None:
             db.session.rollback()
             abort(404)
-
-        if product.quantity + quantity > MAX_STOCK_QUANTITY:
-            db.session.rollback()
-            flash(f"Stock can't go above {MAX_STOCK_QUANTITY:,}.", "error")
-            return redirect(url_for("products.detail", product_id=product_id))
-
-        # Stock calculation: add the received quantity. The status (In/Low/Out
-        # of Stock) is recalculated automatically from the new quantity.
-        product.quantity += quantity
-        db.session.add(
-            StockMovement(
-                product_id=product.id,
-                quantity_change=quantity,  # positive = stock added
-                actor_id=g.user.id,
-                note=note or "Stock added",
-            )
-        )
-        log_activity(g.user.id, f"Added {quantity} to {product.sku} (now {product.quantity})")
+        # change_stock adds the quantity, records the stock movement, and
+        # refuses archived products or stock above the maximum.
+        change_stock(product, quantity, g.user.id, note=note or "Stock added")
         db.session.commit()
+    except StockError as problem:
+        db.session.rollback()
+        flash(str(problem), "error")
+        return redirect(url_for("products.detail", product_id=product_id))
     except Exception:
         db.session.rollback()
         raise

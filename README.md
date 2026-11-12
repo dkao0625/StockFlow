@@ -14,14 +14,15 @@ In many small warehouses, damaged or missing stock gets reported verbally or on 
 
 | Employee | Manager |
 |---|---|
-| View products, quantities, categories, and locations | View all products, including unit cost |
-| Open a detail page for each product | Open a detail page for each product (sees every report) |
-| Add new products (without unit cost) | Add new products and edit product details |
-| | Add stock to existing products (recorded in the stock history) |
-| Report damaged or missing products (quantity + explanation) | View all employee requests (employee, product, quantity, reason) |
-| See the status of **their own** requests | Approve or reject requests, with a note |
-| | Approving automatically subtracts stock; rejecting changes nothing |
-| | View request history |
+| View, search, and filter inventory | Everything an employee can do, plus: |
+| Add new products (without unit cost) | Set and see unit cost |
+| Edit name, SKU, category, description, unit, location, supplier (one product or in bulk) | Also edit reorder level (one product or in bulk) |
+| **Request** stock adjustments (one or many products), which go to Pending | Adjust stock **directly** (Add stock, or bulk Adjust Stock), always recorded |
+| **Request** deletion of products, which goes to Pending | **Archive** products directly (with confirmation) |
+| Report damaged or missing products | Approve or reject any request, one at a time or in bulk |
+| See the status of **their own** requests | View all requests, request history, and the **Activity** log |
+
+Employees never change stock quantities or archive products themselves. Every one of those actions becomes a Pending request in the manager's queue. All of these rules are checked in the Flask routes, so hand-crafted requests get HTTP 403.
 
 ## Main workflow
 
@@ -32,6 +33,20 @@ In many small warehouses, damaged or missing stock gets reported verbally or on 
 5. The manager **approves** or **rejects** the request. Rejecting requires a note.
 6. On approval, the server locks the request and product rows, checks there is enough stock, subtracts the quantity, and records a stock movement, all in one database transaction.
 7. The employee sees the updated status and the manager's note.
+
+The same queue handles **bulk stock adjustments** (increases and decreases) and **deletion requests** from the inventory page's Edit Inventory mode. Approving a deletion request archives the product.
+
+### Inventory edit mode
+
+On **Inventory**, click **Edit Inventory** to show checkboxes and a sticky toolbar: *N selected | Bulk Edit | Adjust Stock | Delete | Cancel*.
+
+- **Select All** ticks only the rows currently shown by the search and filters.
+- **Cancel** leaves edit mode and clears the selection.
+- **Bulk Edit:** switch on the fields to change. Only those fields change, on only the selected products.
+- **Adjust Stock:** one row per product (increase or decrease, quantity, reason, note).
+- **Delete:** archives products; nothing is permanently deleted. Archiving is blocked while a product has pending stock requests. Archived products disappear from the active list and appear under **View archived**, and their requests and stock history are kept.
+
+Every bulk action is saved in **one database transaction**: if any row is invalid, nothing is saved.
 
 ## Technologies
 
@@ -48,19 +63,22 @@ In many small warehouses, damaged or missing stock gets reported verbally or on 
 app.py              App factory, configuration, CLI commands (create-manager, seed-demo)
 models.py           Database tables: User, Product, InventoryRequest, StockMovement, ActivityLog
 auth.py             Register / login / logout, and the login_required / manager_required decorators
-inventory.py        Inventory, employee, and manager pages; approve/reject transaction logic
-products.py         Add / edit / view products and add stock; product form validation
+inventory.py        Inventory (search/filters), employee, manager, and activity pages; approve/reject logic
+products.py         Add / edit / view products and add stock; product form validation and permissions
+bulk.py             Bulk edit, bulk stock adjustment, and bulk delete (archive)
+stock.py            Shared row-locked stock changes and archiving rules used by every route
 migrations/         Flask-Migrate (Alembic) migration scripts; versions/ holds one file per schema change
-templates/          base.html, login, register, inventory, product, product_form, employee, manager, error, _macros
+templates/          base, login, register, inventory, product, product_form, bulk_edit, bulk_adjust,
+                    bulk_archive, activity, employee, manager, error, _macros
 static/style.css    All styling
-static/app.js       Tiny script that prevents double-submitting forms
+static/app.js       Small script: edit mode, checkbox selection, confirmations, and no double-submits
 tests/              pytest tests
 requirements.txt    Production dependencies (requirements-dev.txt adds pytest)
 Dockerfile, .dockerignore   Container for Cloud Run
 .env.example        Template for your local .env (placeholders only)
 ```
 
-Differences from the suggested structure: `products.py` (product pages, split out so `inventory.py` stays focused on the request workflow), `migrations/`, `product.html` / `product_form.html`, `error.html` (friendly 403/404/CSRF pages), `_macros.html` (shared status badges so colors stay consistent), `static/app.js`, and `tests/` plus `requirements-dev.txt`.
+Differences from the suggested structure: `products.py` and `bulk.py` (split out so `inventory.py` stays focused on the request workflow), `stock.py` (shared stock rules), `migrations/`, `product.html` / `product_form.html`, `error.html` (friendly 403/404/CSRF pages), `_macros.html` (shared status badges so colors stay consistent), `static/app.js`, and `tests/` plus `requirements-dev.txt`.
 
 ## Local setup
 
@@ -108,6 +126,7 @@ StockFlow uses **Flask-Migrate** (built on Alembic). Each schema change is a num
 |---|---|
 | `0001_baseline_schema` | The original five tables |
 | `0002_add_product_details` | Adds category, description, unit, location, supplier, unit cost (exact `NUMERIC(10,2)`), and created/updated timestamps to `products`. Existing products get `Other` / `Pieces` and the migration time as their timestamps. |
+| `0003_archiving_and_request_types` | Adds archiving (`is_archived`, `archived_at`, `archived_by_id`) to `products`. Adds `request_type` (adjustment/archive) and `direction` (increase/decrease) to `inventory_requests`, with more allowed reasons. Adds `product_id` to `activity_logs`. Existing requests become "decrease" adjustments. |
 
 Useful commands:
 
@@ -142,7 +161,8 @@ The tests use a temporary SQLite file, so they don't need Neon. They cover:
 
 - **Accounts and access:** registration (which always creates an employee), login, the login requirement on every page, employees being blocked from manager routes (HTTP 403), employees not seeing each other's requests, logout invalidating a copied session cookie, and CSRF rejection.
 - **Requests:** invalid quantities, approval subtracting stock, double approval, rejection leaving stock alone, and the insufficient-stock check.
-- **Products:** product creation with every field, missing or invalid fields (including duplicate SKUs, negative numbers, bad costs, unknown dropdown values, and overly long text), editing, unit cost being hidden from employees, employees creating products (with any unit cost they send ignored) but being blocked from editing or restocking, and the In / Low / Out of Stock rules.
+- **Products:** product creation with every field, and missing or invalid fields (duplicate SKUs, negative numbers, bad costs, unknown dropdown values, overly long text). Employees edit permitted fields but get 403 for quantity, reorder level, unit cost, and restocking. Also unit cost being hidden from employees, and the In / Low / Out of Stock rules.
+- **Bulk actions (`tests/test_bulk.py`):** Select All respecting filters, bulk-editing only the switched-on fields, unselected products staying unchanged, employee stock adjustments becoming Pending requests, manager approval updating stock, all-or-nothing bulk approval, deletion requests and manager approval archiving products, archive blocking, history staying accessible, and permission bypass attempts.
 
 **Row locking** (`SELECT … FOR UPDATE`) only takes effect on PostgreSQL. `tests/test_concurrency.py` fires two simultaneous approvals and is skipped unless you point it at a **throwaway** Postgres database. In Neon, create a separate branch (Branches → New branch, e.g. `test`) and use its connection string:
 
@@ -194,7 +214,14 @@ Notes:
 - Employee registration, login, and logout. The first manager is created with the CLI command.
 - Inventory dashboard with stock status badges and summary cards
 - Employees and managers can add products with full details: category, unit, description, location, and supplier. Only managers can set or see unit cost. The form is split into three sections, with errors shown next to each field.
-- Managers can edit product details. Quantity can only change through stock movements.
+- Employees and managers can edit product details. Reorder level and unit cost are manager-only, and quantity only changes through stock movements.
+- Inventory search and filters (name/SKU/location, category, stock status)
+- **Edit Inventory** mode: checkboxes, Select All (visible rows only), and a sticky bulk toolbar
+- Bulk edit with "update this field" switches, and per-product change history
+- Bulk stock adjustment: employees request it, managers apply it directly or approve requests
+- Bulk delete as archiving: employees request it; managers approve or archive directly. History is kept.
+- Bulk approve/reject on the manager dashboard (one transaction)
+- Manager **Activity** page
 - A detail page for each product showing its details, stock, status, stock history (who, when, why), and related reports
 - Managers can add stock to a product (row-locked and recorded in the stock history)
 - Inventory status (In / Low / Out of Stock) is calculated from quantity and reorder level, never stored
@@ -205,14 +232,15 @@ Notes:
 - Automated tests and a Cloud Run–ready Dockerfile
 
 **Planned for the final project**
-- Deleting or archiving products
-- Employee "add stock" requests that go through manager approval
-- Search, filter, and pagination on inventory and request tables
-- Pages for viewing the stock movement and activity log history
+- Restoring (un-archiving) products
+- Pagination for large inventories
+- Pop-up (modal) editing instead of separate pages
 - Password change and manager-managed user accounts
 
 **Current limitations**
-- Products can't be deleted from the UI yet.
+- Archived products can't be restored from the UI yet.
+- There's no pagination. All matching products are shown at once, and a bulk action is limited to 200 products.
+- The stock-status filter is applied in Python (status is calculated, not stored), which is fine for small inventories.
 - Employees can add new products with a starting quantity without manager approval. The stock history and activity log record who added each product.
 - Products that existed before migration `0002` show their migration time as "Created" and default to category `Other` and unit `Pieces` until a manager edits them.
 - No rate limiting on login attempts.

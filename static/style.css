@@ -285,3 +285,66 @@ textarea { resize: vertical; }
   .form-actions .btn { flex: 1; }
   .stat-value { font-size: 22px; }
 }
+
+/* ---------- Inventory filters, edit mode, and bulk actions ---------- */
+
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.muted-title { color: var(--muted); font-weight: 500; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px; margin-bottom: 16px; box-shadow: var(--shadow);
+}
+.filter-bar input[type="search"] { flex: 1 1 220px; width: auto; }
+.filter-bar select { width: auto; flex: 0 1 180px; }
+.filter-spacer { flex: 1; }
+.btn-link { background: none; border-color: transparent; color: var(--primary); padding-left: 8px; padding-right: 8px; }
+.btn-link:hover { text-decoration: underline; }
+.btn-small { padding: 4px 10px; font-size: 12px; }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-danger:hover { filter: brightness(0.92); }
+
+.table-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+
+/* The bulk toolbar sticks to the top of the screen while scrolling. */
+.bulk-toolbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  background: #eef3ff; border: 1px solid #c9d8fb; border-radius: 8px;
+  padding: 8px 12px; margin-bottom: 12px;
+}
+.bulk-toolbar .btn { padding: 6px 12px; font-size: 13px; }
+.bulk-toolbar input { width: auto; flex: 1 1 220px; padding: 6px 9px; font-size: 13px; }
+.toolbar-divider { width: 1px; align-self: stretch; background: #c9d8fb; }
+
+/* Checkbox column: hidden until "Edit Inventory" is clicked. */
+.select-col { width: 36px; text-align: center; }
+.select-col input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+[data-bulk]:not(.is-editing) .select-col { display: none; }
+tr.is-selected td { background: #f2f6ff; }
+.actions-col { width: 1%; white-space: nowrap; text-align: right; }
+
+/* Bulk pages */
+.affected { margin-bottom: 16px; }
+.selected-list summary { cursor: pointer; color: var(--primary); margin-top: 4px; }
+.selected-list ul { margin: 8px 0 0; padding-left: 20px; max-height: 180px; overflow: auto; }
+.bulk-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; }
+.bulk-field { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.toggle input { width: 16px; height: 16px; accent-color: var(--primary); }
+.adjust-table select, .adjust-table input { min-width: 110px; }
+.adjust-table .qty-input { width: 90px; min-width: 0; }
+tr.row-error td { background: #fff6f5; }
+.confirm-box { max-width: 760px; }
+.confirm-box h1 { font-size: 20px; margin-bottom: 8px; }
+.confirm-table { margin: 16px 0; }
+.danger-confirm { margin-top: 16px; color: var(--red); }
+.archived-banner { margin-bottom: 16px; }
+.review-toolbar { position: static; }
+
+@media (max-width: 640px) {
+  .bulk-fields { grid-template-columns: 1fr; }
+  .filter-bar select { flex: 1 1 140px; }
+}

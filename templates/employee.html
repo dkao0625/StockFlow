@@ -58,8 +58,7 @@
           <tr>
             <th>#</th>
             <th>Product</th>
-            <th>Type</th>
-            <th class="num">Qty</th>
+            <th>Request</th>
             <th>Status</th>
             <th>Manager note</th>
           </tr>
@@ -69,13 +68,12 @@
             <tr>
               <td class="mono">{{ req.id }}</td>
               <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a><div class="sub">{{ date(req.created_at) }}</div></td>
-              <td>{{ req.reason }}</td>
-              <td class="num">{{ req.quantity }}</td>
+              <td>{{ req.summary }}</td>
               <td>{{ request_badge(req.status) }}</td>
               <td>{{ req.manager_note or '—' }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="empty">You haven't submitted any reports yet.</td></tr>
+            <tr><td colspan="5" class="empty">You haven't submitted any reports yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>

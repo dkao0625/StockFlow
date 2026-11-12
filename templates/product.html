@@ -2,19 +2,29 @@
 {% from "_macros.html" import stock_badge, request_badge, date %}
 {% block title %}{{ product.name }}{% endblock %}
 {% block content %}
-<a class="back-link" href="{{ url_for('inventory.inventory_list') }}">← All inventory</a>
+<a class="back-link" href="{{ url_for('inventory.inventory_list', show='archived' if product.is_archived else None) }}">← All inventory</a>
+
+{% if product.is_archived %}
+  <div class="flash flash-warning archived-banner">
+    <strong>Archived</strong> on {{ date(product.archived_at) }}{% if product.archived_by %} by {{ product.archived_by.username }}{% endif %}.
+    This product is hidden from active inventory and can't be edited or restocked. Its history is kept below.
+  </div>
+{% endif %}
 
 <header class="page-header product-header">
   <div>
     <h1>{{ product.name }}</h1>
     <p class="muted"><span class="mono">{{ product.sku }}</span> · {{ product.category }} · {{ stock_badge(product.stock_status) }}</p>
   </div>
-  {% if g.user.is_manager %}
-    <a class="btn btn-secondary" href="{{ url_for('products.edit', product_id=product.id) }}">Edit product</a>
-  {% elif product.quantity > 0 %}
-    <a class="btn btn-red" href="{{ url_for('inventory.employee_dashboard', product_id=product.id) }}#report">
-      Report damaged / missing
-    </a>
+  {% if not product.is_archived %}
+    <div class="header-actions">
+      {% if not g.user.is_manager and product.quantity > 0 %}
+        <a class="btn btn-red" href="{{ url_for('inventory.employee_dashboard', product_id=product.id) }}#report">
+          Report damaged / missing
+        </a>
+      {% endif %}
+      <a class="btn btn-secondary" href="{{ url_for('products.edit', product_id=product.id) }}">Edit product</a>
+    </div>
   {% endif %}
 </header>
 
@@ -60,7 +70,7 @@
       </dl>
     </section>
 
-    {% if g.user.is_manager %}
+    {% if g.user.is_manager and not product.is_archived %}
       {# Only managers change stock directly; the route checks this too. #}
       <section class="panel">
         <h2>Add stock</h2>
@@ -109,15 +119,14 @@
 </div>
 
 <section class="panel section-gap">
-  <h2>{{ 'Damage & missing reports' if g.user.is_manager else 'My reports for this product' }}</h2>
+  <h2>{{ 'Requests for this product' if g.user.is_manager else 'My requests for this product' }}</h2>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>#</th>
           {% if g.user.is_manager %}<th>Employee</th>{% endif %}
-          <th>Type</th>
-          <th class="num">Qty</th>
+          <th>Request</th>
           <th>Explanation</th>
           <th>Status</th>
           <th>Manager note</th>
@@ -128,17 +137,38 @@
           <tr>
             <td class="mono">{{ req.id }}</td>
             {% if g.user.is_manager %}<td>{{ req.employee.username }}</td>{% endif %}
-            <td>{{ req.reason }}<div class="sub">{{ date(req.created_at) }}</div></td>
-            <td class="num">{{ req.quantity }}</td>
-            <td class="reason">{{ req.notes }}</td>
+            <td>{{ req.summary }}<div class="sub">{{ date(req.created_at) }}</div></td>
+            <td class="reason">{{ req.notes or '—' }}</td>
             <td>{{ request_badge(req.status) }}</td>
             <td>{{ req.manager_note or '—' }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="empty">No reports for this product.</td></tr>
+          <tr><td colspan="6" class="empty">No requests for this product.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
+
+{% if g.user.is_manager %}
+  <section class="panel">
+    <h2>Change history</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Who</th><th>What changed</th></tr></thead>
+        <tbody>
+          {% for entry in change_history %}
+            <tr>
+              <td class="nowrap">{{ date(entry.created_at) }}</td>
+              <td>{{ entry.actor.username if entry.actor else '—' }}</td>
+              <td class="reason">{{ entry.action }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="empty">No recorded changes yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endif %}
 {% endblock %}
