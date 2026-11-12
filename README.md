@@ -18,6 +18,7 @@ In many small warehouses, damaged or missing stock gets reported verbally or on 
 | Report damaged or missing products (quantity + explanation) | View all employee requests (employee, product, quantity, reason) |
 | See the status of **their own** requests | Approve or reject requests, with a note |
 | | Approving automatically subtracts stock; rejecting changes nothing |
+| | Add new products to inventory |
 | | View request history |
 
 ## Main workflow
@@ -156,20 +157,21 @@ Notes:
 **Completed**
 - Employee registration, login, and logout. The first manager is created with the CLI command.
 - Inventory dashboard with stock status badges and summary cards
+- Managers can add new products (name, SKU, starting quantity, reorder level) from the Inventory page
 - Employee damage/missing reports and "My requests" status list
 - Manager review: approve/reject with notes, pending queue, request history
 - Transactional approval with row locking, stock check, stock movements, and an activity log
 - Automated tests and a Cloud Run–ready Dockerfile
 
 **Planned for the final project**
-- Managers can add and edit products and restock (positive stock movements)
+- Managers can edit products and restock existing ones
 - Search, filter, and pagination on inventory and request tables
 - Pages for viewing the stock movement and activity log history
 - Database migrations (Flask-Migrate) instead of `create_all`
 - Password change and manager-managed user accounts
 
 **Current limitations**
-- Products can only be added through `seed-demo` or directly in the database (there's no UI yet).
+- Products can be added but not yet edited, restocked, or deleted from the UI.
 - Schema changes require dropping or recreating tables, because there are no migrations yet.
 - No rate limiting on login attempts.
 - Request history shows only the 50 most recent reviewed requests.

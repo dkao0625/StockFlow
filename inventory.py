@@ -8,7 +8,10 @@ Workflow:
   3. Employee sees the updated status on their dashboard.
 """
 
+import re
+
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
+from sqlalchemy.exc import IntegrityError
 
 from auth import employee_required, login_required, manager_required
 from models import (
@@ -26,7 +29,9 @@ from models import (
 inventory_bp = Blueprint("inventory", __name__)
 
 MAX_REQUEST_QUANTITY = 100_000
+MAX_STOCK_QUANTITY = 1_000_000
 MAX_NOTE_LENGTH = 500
+SKU_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,39}$")
 
 
 def inventory_stats(products):
@@ -63,13 +68,89 @@ def index():
     return redirect(url_for("inventory.employee_dashboard"))
 
 
+def render_inventory_page(form_values=None, status_code=200):
+    products = Product.query.order_by(Product.name).all()
+    return render_template(
+        "inventory.html",
+        products=products,
+        stats=inventory_stats(products),
+        # Re-fill the "Add product" form after a validation error.
+        form=form_values or {},
+    ), status_code
+
+
 @inventory_bp.route("/inventory")
 @login_required
 def inventory_list():
-    products = Product.query.order_by(Product.name).all()
-    return render_template(
-        "inventory.html", products=products, stats=inventory_stats(products)
+    return render_inventory_page()
+
+
+def parse_stock_number(raw_value):
+    """Turn form text into a whole number from 0 to MAX_STOCK_QUANTITY, or None."""
+    try:
+        number = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or number > MAX_STOCK_QUANTITY:
+        return None
+    return number
+
+
+@inventory_bp.route("/products", methods=["POST"])
+@manager_required  # employees get 403 even if they post to this URL directly
+def add_product():
+    form_values = {
+        "name": request.form.get("name", "").strip(),
+        "sku": request.form.get("sku", "").strip().upper(),
+        "quantity": request.form.get("quantity", "").strip(),
+        "reorder_level": request.form.get("reorder_level", "").strip(),
+    }
+    quantity = parse_stock_number(form_values["quantity"])
+    reorder_level = parse_stock_number(form_values["reorder_level"])
+
+    # Server-side validation.
+    error = None
+    if not form_values["name"] or len(form_values["name"]) > 120:
+        error = "Product name is required (120 characters max)."
+    elif not SKU_PATTERN.match(form_values["sku"]):
+        error = "SKU must be 2-40 characters: letters, numbers, or dashes (e.g. SF-2001)."
+    elif quantity is None:
+        error = f"Starting quantity must be a whole number from 0 to {MAX_STOCK_QUANTITY:,}."
+    elif reorder_level is None:
+        error = f"Reorder level must be a whole number from 0 to {MAX_STOCK_QUANTITY:,}."
+    elif Product.query.filter_by(sku=form_values["sku"]).first() is not None:
+        error = f"A product with SKU {form_values['sku']} already exists."
+
+    if error:
+        flash(error, "error")
+        return render_inventory_page(form_values, status_code=400)
+
+    new_product = Product(
+        name=form_values["name"],
+        sku=form_values["sku"],
+        quantity=quantity,
+        reorder_level=reorder_level,
     )
+    db.session.add(new_product)
+    db.session.flush()  # assigns new_product.id
+
+    # Record the starting stock as a movement so the stock history is complete.
+    # request_id is empty because this didn't come from an employee request.
+    if quantity > 0:
+        db.session.add(StockMovement(product_id=new_product.id, quantity_change=quantity))
+    log_activity(g.user.id, f"Added product {new_product.sku} ({new_product.name}) with {quantity} unit(s)")
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Two managers added the same SKU at the same moment; the database's
+        # UNIQUE constraint caught it.
+        db.session.rollback()
+        flash(f"A product with SKU {form_values['sku']} already exists.", "error")
+        return render_inventory_page(form_values, status_code=400)
+
+    flash(f"Added {new_product.name} ({new_product.sku}).", "success")
+    return redirect(url_for("inventory.inventory_list"))
 
 
 # ---------------------------------------------------------------------------
