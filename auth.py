@@ -76,6 +76,7 @@ def load_logged_in_user():
         user is None
         or session.get("session_version") != user.session_version
         or not user.is_active
+        or user.is_deleted
     ):
         session.clear()
         return
@@ -176,6 +177,9 @@ def login():
             return render_template("login.html", username=username), 401
         # Only said AFTER the correct password, so it can't be used to find
         # out which usernames exist.
+        if user.is_deleted:
+            flash("This account has been deleted. Please ask a manager.", "error")
+            return render_template("login.html", username=username), 403
         if not user.is_active:
             flash("This account has been deactivated. Please ask a manager.", "error")
             return render_template("login.html", username=username), 403

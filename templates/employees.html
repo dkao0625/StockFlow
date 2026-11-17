@@ -24,12 +24,62 @@
     <option value="">Any status</option>
     <option value="active" {{ 'selected' if filters.status == 'active' }}>Active</option>
     <option value="deactivated" {{ 'selected' if filters.status == 'deactivated' }}>Inactive</option>
+    <option value="deleted" {{ 'selected' if filters.status == 'deleted' }}>Deleted ({{ deleted_count }})</option>
   </select>
+  {% if showing_deleted %}
+    <label class="date-filter">Deleted from <input type="date" name="deleted_from" value="{{ filters.deleted_from }}"></label>
+    <label class="date-filter">to <input type="date" name="deleted_to" value="{{ filters.deleted_to }}"></label>
+  {% endif %}
   <button type="submit" class="btn btn-secondary">Filter</button>
   {% if filters.q or filters.role or filters.status %}
     <a class="btn btn-link" href="{{ url_for('employees.employee_list') }}">Clear</a>
   {% endif %}
 </form>
+
+{% if showing_deleted %}
+{# ---- Deleted accounts: kept for history, shown separately ---- #}
+<section class="panel">
+  <h2>Deleted employees <span class="count count-red">{{ users|length }}</span></h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Username</th><th>Email</th><th>Created</th>
+          <th>Deleted</th><th>Deleted by</th><th>Reason</th><th>Status</th><th class="actions-col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+          <tr>
+            <td>{{ user.full_name or '—' }}</td>
+            <td class="mono">{{ user.username }}</td>
+            <td>{{ user.email or '—' }}</td>
+            <td class="nowrap">{{ user.created_at.strftime('%b %d, %Y') if user.created_at else '—' }}</td>
+            <td class="nowrap">{{ date(user.deleted_at) if user.deleted_at else '—' }}</td>
+            <td>{{ user.deleted_by.username if user.deleted_by else '—' }}</td>
+            <td class="reason">{{ user.deletion_reason or '—' }}</td>
+            <td><span class="badge badge-red">Deleted</span></td>
+            <td class="actions-col">
+              <div class="row-actions">
+                <a class="btn btn-secondary btn-small" href="{{ url_for('employees.profile', user_id=user.id) }}">View details</a>
+                {% if user.role == 'employee' %}
+                  <form method="post" action="{{ url_for('employees.restore_employee', user_id=user.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-green btn-small"
+                            data-confirm="Restore {{ user.username }}? They get a new temporary password (shown once) and must choose their own at next login.">Restore</button>
+                  </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="empty">No deleted accounts match these filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
 
 <section class="panel">
   <div class="table-wrap">
@@ -76,6 +126,9 @@
                             data-confirm="Reset the password for {{ user.username }}? They will be logged out and must use the new temporary password.">Reset password</button>
                   </form>
                 {% endif %}
+                {% if user.role == 'employee' %}
+                  <a class="btn btn-danger btn-small" href="{{ url_for('employees.delete_employee', user_id=user.id) }}">Delete</a>
+                {% endif %}
                 {% if user.id != g.user.id %}
                   {% if user.is_active %}
                     <form method="post" action="{{ url_for('employees.deactivate', user_id=user.id) }}">
@@ -102,4 +155,5 @@
     </table>
   </div>
 </section>
+{% endif %}
 {% endblock %}

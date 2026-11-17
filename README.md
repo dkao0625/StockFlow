@@ -79,6 +79,16 @@ Click your name at the bottom of the sidebar to open **My Profile** (`/profile`)
 
 Profile updates and password changes are written to the activity log without the personal details or passwords themselves.
 
+## Deleting and restoring employees
+
+Employee accounts are **never removed from the database** ("soft delete"), so their requests, stock movements, and activity keep showing who did them.
+
+- **Delete** (employee profile or Employees list): a dialog shows the employee's details and asks for a **required reason**. The account is marked deleted and inactive, every open session ends on its next click, and login is refused. Deleted accounts disappear from the normal Employees list and appear under **Employees → Deleted** (search, deletion-date filters, View details, Restore).
+- **Restore**: the account becomes active again with a **new temporary password** (shown once) that must be changed at the next login; old sessions stay logged out.
+- Managers can't delete manager accounts or themselves, and employees can't delete anyone (checked on the server).
+- Every deletion and restoration is written to the activity log (**Employee deleted / Employee restored**, with the manager, the account, the time, and the reason or note). Those entries can't be edited, so the full history survives later restores; the profile shows it under **Deletion history**.
+- A deleted account keeps its username and email, so they can't be reused by a new account (the error message points to Restore instead).
+
 ## Employee pages
 
 | Page | What it shows |
@@ -98,7 +108,7 @@ Profile updates and password changes are written to the activity log without the
 | **Stock Alerts** (`/alerts`) | Low and out-of-stock products with search, sorting, reorder level, target level, suggested reorder quantity, and units already on order. Managers can change reorder/target levels here. |
 | **Restock orders** (`/restock`) | Restocks awaiting delivery, pending, or received, with **Receive stock** and **Close order**. |
 | **Activity** (`/activity`) | Every logged action with user, role, action type, product or account, description, and quantity change. Search, date range, action type, user and role filters, pages of 50, and CSV export. Entries can't be edited or deleted. |
-| **Employees** (`/employees`) | All accounts with name, username, email, role, status, created date, last login, and request count; search by name, username, or email. **+ Add employee**, **Edit**, **Reset password**, and **Deactivate / Activate**. Profiles show requests and activity. |
+| **Employees** (`/employees`) | All accounts with name, username, email, role, status, created date, last login, and request count; search by name, username, or email. **+ Add employee**, **Edit**, **Reset password**, **Deactivate / Activate**, and **Delete**. The **Deleted** filter lists deleted accounts (with deletion date, who deleted them, and why) and **Restore**. Profiles show requests, activity, and deletion history. |
 | **Reports** (`/reports`) | Inventory summary (now), stock movements in a date range (added, removed, damaged/missing, by day), and employee requests in that range (by status, employee, and type). Simple CSS bar charts. |
 
 **CSV exports** (managers only): inventory, stock alerts, approvals, activity, stock movements, and requests. Each export uses the filters of the page it comes from.
@@ -213,8 +223,9 @@ StockFlow uses **Flask-Migrate** (built on Alembic). Each schema change is a num
 | `0008_count_and_issue_requests` | Adds `counted_quantity` and `additional_notes` to `inventory_requests`, and allows the `count` and `issue` request types and the `Other` reason. |
 | `0009_activity_request_link` | Adds `request_id` to `activity_logs`. Existing entries are linked only when their text names an existing request for the same product. |
 | `0010_manager_created_accounts` | Adds `full_name`, `email` (unique), `must_change_password` (false for existing accounts), and `last_login_at` (filled from the latest login entry) to `users`. |
+| `0011_soft_delete_users` | Adds `is_deleted` (false for existing accounts), `deleted_at`, `deleted_by_id`, and `deletion_reason` to `users`. |
 
-Migrations `0004`–`0010` only **add** columns, tables, and indexes, or replace CHECK rules with **wider** ones; nothing is dropped or deleted.
+Migrations `0004`–`0011` only **add** columns, tables, and indexes, or replace CHECK rules with **wider** ones; nothing is dropped or deleted.
 
 Useful commands:
 
@@ -263,6 +274,7 @@ With `DATABASE_URL_TEST` blank, the tests use a temporary SQLite file and need n
 - **Employee access (`test_employee_access.py`):** permitted inventory editing and bulk actions (recorded under the employee), 23 manager-only routes refused, Stock Alerts as an employee, and My Activity with related requests.
 - **My Profile (`test_profile.py`):** both roles see only their own profile (ids in the URL are ignored), placeholders for missing details, recent activity, the sidebar link, editing your own name and email (role, status, username, and other users can't be changed), validation and duplicate emails, and changing your password from the profile (current password required, other sessions logged out, no off-site redirects).
 - **Accounts and passwords (`test_accounts.py`, `test_password_management.py`):** no public sign-up, manager-created employees, validation and duplicates, first-login password change enforced on every route, password reset, and editing employees.
+- **Deleting and restoring (`test_employee_deletion.py`):** soft deletion with a required reason, confirmation details, employees/managers/self/unauthenticated blocked, sessions and logins refused, deleted accounts hidden from normal lists and shown in the Deleted view (search and dates), history kept under the employee's real name, restoring with a temporary password, and the full delete/restore history kept.
 - **Reports and CSV (`test_reports.py`):** manager-only reports and exports, movement and request totals by date range, exports respecting filters, formula-injection protection, and no secrets in any export.
 
 **Row locking** (`SELECT … FOR UPDATE`) only takes effect on PostgreSQL. `tests/test_concurrency.py` fires two simultaneous approvals and is skipped unless you point it at a **throwaway** Postgres database. In Neon, create a separate branch (Branches → New branch, e.g. `test`) and use its connection string:
@@ -298,6 +310,8 @@ Run locally against the **dev** branch (`flask --app app run --debug`). Use two 
 | First login | Log in as the new employee with the temporary password | Only the Choose your password page works until a new password is saved |
 | Reset password | Manager: Employees → **Reset password** (confirm) | New temporary password shown once; the employee is logged out and must change it at next login |
 | No public sign-up | Visit `/register` | 404 Page not found |
+| Delete employee | Manager: employee profile → **Delete** → enter a reason → **Delete Employee** | The employee is logged out, can't log in, and appears only under Employees → Deleted with the reason |
+| Restore employee | Employees → Deleted → **Restore** (confirm) | New temporary password shown once; profile shows Active and the Deletion history |
 | My Profile | Click your name at the bottom of the sidebar (as an employee and as a manager) | Your own details, initials avatar, and 5 latest actions |
 | Edit profile | My Profile → **Edit profile** → change name and email → Save | "Your profile was updated." and the new values; try another account's email to see the error |
 | Change password | My Profile → **Change password** | Wrong current password is rejected; after saving you return to My Profile and other browsers are logged out |
@@ -331,6 +345,34 @@ gcloud run deploy stockflow \
 ```
 
 To redeploy after code changes: `gcloud run deploy stockflow --source . --region us-east5` (settings carry over).
+
+> ⚠️ **Always deploy to the service `stockflow` in region `us-east5`.** The secrets (`SECRET_KEY`, `DATABASE_URL_PROD`) are attached to that one service. If you leave out `--region` and pick another region at the prompt, gcloud quietly creates a **second** `stockflow` service there without any secrets. It can't start, and its URL shows `upstream connect error or disconnect/reset before headers`. To avoid this, set the default region once:
+>
+> ```bash
+> gcloud config set run/region us-east5
+> ```
+>
+> If it happens anyway, delete the extra service (and its image repository), e.g. for `us-west2`:
+>
+> ```bash
+> gcloud run services delete stockflow --region us-west2
+> gcloud artifacts repositories delete cloud-run-source-deploy --location us-west2
+> ```
+
+**Rolling back a bad deploy.** Every deploy creates a new *revision*, and old ones are kept. To send all traffic back to the last working version (no rebuild needed, takes seconds):
+
+```bash
+gcloud run revisions list --service stockflow --region us-east5   # newest first
+gcloud run services update-traffic stockflow --region us-east5 --to-revisions REVISION_NAME=100
+```
+
+Then check the errors of the bad revision before deploying again:
+
+```bash
+gcloud logging read 'resource.labels.service_name="stockflow" AND severity>=ERROR' --freshness=15m --limit 10
+```
+
+The next normal `gcloud run deploy` sends traffic to the new revision again. Rolling back only changes the code that runs; if the bad deploy came with a database migration, the database stays upgraded (all StockFlow migrations only add things, so older code keeps working with it).
 
 `--source .` makes Cloud Build build the `Dockerfile` for you, so you don't need Docker installed. When the command finishes it prints the public URL. Put it at the top of this README.
 

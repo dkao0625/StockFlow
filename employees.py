@@ -15,6 +15,7 @@ Safety rules (checked on the server):
 
 import secrets
 import string
+from datetime import datetime, time, timedelta, timezone
 
 from flask import Blueprint, abort, flash, g, make_response, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
@@ -36,7 +37,9 @@ from models import (
     User,
     db,
     log_activity,
+    utc_now,
 )
+from activity import parse_day
 from products import safe_next_url
 
 employees_bp = Blueprint("employees", __name__, url_prefix="/employees")
@@ -80,7 +83,12 @@ def read_account_form(form, existing_user=None):
         taken = User.query.filter(User.username == values["username"])
         if existing_user is not None:
             taken = taken.filter(User.id != existing_user.id)
-        if taken.first():
+        owner = taken.first()
+        if owner and owner.is_deleted:
+            # Deleted accounts keep their username so their history stays clear.
+            errors["username"] = ("That username belongs to a deleted account. Restore that account "
+                                  "(Employees → Deleted) or choose another username.")
+        elif owner:
             errors["username"] = "That username is already taken."
 
     if not values["email"]:
@@ -91,7 +99,11 @@ def read_account_form(form, existing_user=None):
         taken = User.query.filter(User.email == values["email"])
         if existing_user is not None:
             taken = taken.filter(User.id != existing_user.id)
-        if taken.first():
+        owner = taken.first()
+        if owner and owner.is_deleted:
+            errors["email"] = ("That email belongs to a deleted account. Restore that account "
+                               "(Employees → Deleted) or use another email.")
+        elif owner:
             errors["email"] = "Another account already uses that email."
     return values, errors
 
@@ -131,8 +143,12 @@ def employee_list():
         "q": request.args.get("q", "").strip().lower(),
         "role": request.args.get("role", ""),
         "status": request.args.get("status", ""),
+        "deleted_from": request.args.get("deleted_from", ""),
+        "deleted_to": request.args.get("deleted_to", ""),
     }
-    query = User.query
+    showing_deleted = filters["status"] == "deleted"
+    # Deleted accounts live in their own view; every other view hides them.
+    query = User.query.filter(User.is_deleted.is_(showing_deleted))
     if filters["q"]:
         pattern = f"%{filters['q']}%"
         query = query.filter(db.or_(
@@ -144,12 +160,28 @@ def employee_list():
         query = query.filter(User.is_active.is_(True))
     elif filters["status"] == "deactivated":
         query = query.filter(User.is_active.is_(False))
-    users = query.order_by(User.role.desc(), User.username).all()  # employees first
+
+    if showing_deleted:
+        # Deletion date range (whole days, UTC), like the Activity page.
+        start, end = parse_day(filters["deleted_from"]), parse_day(filters["deleted_to"])
+        if start:
+            query = query.filter(User.deleted_at >= datetime.combine(start, time.min, timezone.utc))
+        else:
+            filters["deleted_from"] = ""
+        if end:
+            query = query.filter(User.deleted_at < datetime.combine(end + timedelta(days=1), time.min, timezone.utc))
+        else:
+            filters["deleted_to"] = ""
+        users = query.order_by(User.deleted_at.desc(), User.username).all()
+    else:
+        users = query.order_by(User.role.desc(), User.username).all()  # employees first
 
     return render_template(
         "employees.html",
         users=users,
         filters=filters,
+        showing_deleted=showing_deleted,
+        deleted_count=User.query.filter(User.is_deleted.is_(True)).count(),
         request_counts=request_counts(),
         last_activity=last_activity_times(),
     )
@@ -229,6 +261,15 @@ def profile(user_id):
         .limit(PROFILE_LIMIT)
         .all()
     )
+    # Every deletion / restoration of this account, newest first (kept forever).
+    deletion_history = (
+        ActivityLog.query.filter(
+            ActivityLog.target_user_id == user.id,
+            ActivityLog.category.in_(["employee_deleted", "employee_restored"]),
+        )
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+        .all()
+    )
     recent_activity = (
         ActivityLog.query.filter(
             db.or_(ActivityLog.actor_id == user.id, ActivityLog.target_user_id == user.id)
@@ -245,6 +286,7 @@ def profile(user_id):
         pending_requests=requests_by_status.get(STATUS_PENDING, 0),
         recent_requests=recent_requests,
         recent_activity=recent_activity,
+        deletion_history=deletion_history,
         last_activity=last_activity_times().get(user.id),
     )
 
@@ -283,9 +325,9 @@ def deactivate(user_id):
         if target is None:
             db.session.rollback()
             abort(404)
-        if not target.is_active:
+        if target.is_deleted or not target.is_active:
             db.session.rollback()
-            flash(f"{target.username} is already deactivated.", "warning")
+            flash(f"{target.username} is already {'deleted' if target.is_deleted else 'deactivated'}.", "warning")
             return redirect(back)
         if target.is_manager and len(active_managers) <= 1:
             db.session.rollback()
@@ -313,6 +355,9 @@ def deactivate(user_id):
 def activate(user_id):
     back = safe_next_url(url_for("employees.profile", user_id=user_id))
     target = db.get_or_404(User, user_id)
+    if target.is_deleted:
+        flash(f"{target.username} is deleted. Use Restore employee instead.", "error")
+        return redirect(back)
     if target.is_active:
         flash(f"{target.username} is already active.", "warning")
         return redirect(back)
@@ -335,6 +380,8 @@ def employee_account_or_404(user_id):
     user = db.get_or_404(User, user_id)
     if user.role != ROLE_EMPLOYEE:
         abort(403)
+    if user.is_deleted:
+        abort(409)  # deleted accounts must be restored first
     return user
 
 
@@ -411,3 +458,144 @@ def edit_employee(user_id):
 
     flash(f"Saved: {', '.join(changes)}.", "success")
     return redirect(url_for("employees.profile", user_id=employee.id))
+
+
+# ---------------------------------------------------------------------------
+# Delete (soft delete) -- employee accounts only
+# ---------------------------------------------------------------------------
+
+MAX_DELETION_REASON_LENGTH = 500
+
+
+def deletable_employee_or_error(user_id):
+    """(user, None) if this account may be deleted, else (user_or_None, error message)."""
+    user = db.session.get(User, user_id)
+    if user is None:
+        abort(404)
+    if user.id == g.user.id:
+        return user, "You can't delete your own account."
+    if user.role != ROLE_EMPLOYEE:
+        return user, "Manager accounts can't be deleted here."
+    if user.is_deleted:
+        return user, f"{user.username} is already deleted."
+    return user, None
+
+
+@employees_bp.route("/<int:user_id>/delete", methods=["GET", "POST"])
+@manager_required
+def delete_employee(user_id):
+    """
+    Soft-delete an employee: the row stays (so requests, stock movements, and
+    activity keep their real author), but the account can never log in again
+    unless a manager restores it. A reason is required.
+    GET shows a confirmation page (used when JavaScript is off; normally the
+    profile page shows the same form in a pop-up dialog).
+    """
+    profile_page = url_for("employees.profile", user_id=user_id)
+    employee, error = deletable_employee_or_error(user_id)
+    if error:
+        if employee.role != ROLE_EMPLOYEE or employee.id == g.user.id:
+            abort(403)
+        flash(error, "warning")
+        return redirect(profile_page)
+
+    if request.method == "GET":
+        return render_template("employee_delete.html", employee=employee, reason="", error=None)
+
+    reason = request.form.get("reason", "").strip()
+    error = None
+    if not reason:
+        error = "Please give a reason for deleting this account."
+    elif len(reason) > MAX_DELETION_REASON_LENGTH:
+        error = f"The reason must be {MAX_DELETION_REASON_LENGTH} characters or fewer."
+    if error:
+        return render_template("employee_delete.html", employee=employee, reason=reason, error=error), 400
+
+    # ---- One transaction: the account change and its audit entry together ----
+    try:
+        # Lock the row so two managers can't delete (or edit) it at the same time.
+        employee = db.session.execute(
+            db.select(User).where(User.id == user_id).with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one()
+        if employee.is_deleted:
+            db.session.rollback()
+            flash(f"{employee.username} was already deleted.", "warning")
+            return redirect(profile_page)
+
+        employee.is_deleted = True
+        employee.is_active = False
+        employee.deleted_at = utc_now()
+        employee.deleted_by_id = g.user.id
+        employee.deletion_reason = reason
+        employee.session_version += 1  # every open session ends on its next click
+        log_activity(
+            g.user.id, f"Deleted employee account '{employee.username}'. Reason: {reason}",
+            category="employee_deleted", target_user_id=employee.id,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    flash(f"{employee.username} was deleted. Their requests and activity are kept. "
+          "You can find them under Employees → Deleted.", "success")
+    return redirect(url_for("employees.employee_list", status="deleted"))
+
+
+
+# ---------------------------------------------------------------------------
+# Restore a deleted employee
+# ---------------------------------------------------------------------------
+
+@employees_bp.route("/<int:user_id>/restore", methods=["POST"])
+@manager_required
+def restore_employee(user_id):
+    """
+    Bring a deleted employee back. They get a NEW temporary password (shown
+    once) and must choose their own at next login; any old session stays dead.
+    The deletion record and its log entry are kept -- restoring adds a new
+    "Employee restored" entry instead of erasing anything.
+    """
+    profile_page = url_for("employees.profile", user_id=user_id)
+    note = request.form.get("note", "").strip()
+    if len(note) > MAX_DELETION_REASON_LENGTH:
+        flash(f"The note must be {MAX_DELETION_REASON_LENGTH} characters or fewer.", "error")
+        return redirect(profile_page)
+
+    try:
+        employee = db.session.execute(
+            db.select(User).where(User.id == user_id).with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if employee is None:
+            db.session.rollback()
+            abort(404)
+        if employee.role != ROLE_EMPLOYEE:
+            db.session.rollback()
+            abort(403)
+        if not employee.is_deleted:
+            db.session.rollback()
+            flash(f"{employee.username} isn't deleted.", "warning")
+            return redirect(profile_page)
+
+        temporary_password = generate_temporary_password()
+        employee.is_deleted = False
+        employee.is_active = True
+        employee.set_password(temporary_password)  # stored hashed
+        employee.must_change_password = True       # their own password at next login
+        employee.session_version += 1              # no old session comes back to life
+        # deleted_at / deleted_by / deletion_reason are KEPT as the last deletion record.
+        log_activity(
+            g.user.id,
+            f"Restored employee account '{employee.username}'" + (f". Note: {note}" if note else ""),
+            category="employee_restored", target_user_id=employee.id,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    return no_store(make_response(render_template(
+        "employee_created.html", employee=employee, temporary_password=temporary_password, was_restored=True,
+    )))

@@ -94,6 +94,19 @@ class User(db.Model):
     must_change_password = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
+    # Soft deletion: a "deleted" account is NEVER removed from the database,
+    # so its requests, stock movements, and activity keep pointing at it. It
+    # just can't log in and is hidden from the normal Employees list. These
+    # columns describe the MOST RECENT deletion; the full history (every
+    # deletion and restoration, with reasons) is in the activity log.
+    is_deleted = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    deleted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    deleted_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    deletion_reason = db.Column(db.Text, nullable=True)
+
+    # remote_side: this is a link from one user row to ANOTHER user row.
+    deleted_by = db.relationship("User", remote_side=[id], foreign_keys=[deleted_by_id])
+
     # Every time a user logs out, this number goes up by one. The login
     # session stores the number it was created with; if they no longer
     # match, the old session cookie is rejected. This is how logout
@@ -535,6 +548,8 @@ ACTIVITY_CATEGORIES = {
     "product_archived": "Product archived",
     "stock_received": "Stock received",
     "account": "Account change",
+    "employee_deleted": "Employee deleted",
+    "employee_restored": "Employee restored",
     "login": "Log in / out",
 }
 

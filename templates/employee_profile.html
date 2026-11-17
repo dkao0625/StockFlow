@@ -10,12 +10,21 @@
     <h1>{{ user.display_name }}</h1>
     <p class="muted">
       <span class="mono">{{ user.username }}</span> · {{ user.role|capitalize }} ·
-      {% if user.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-red">Deactivated</span>{% endif %}
+      {% if user.is_deleted %}<span class="badge badge-red">Deleted</span>
+      {% elif user.is_active %}<span class="badge badge-green">Active</span>
+      {% else %}<span class="badge badge-red">Deactivated</span>{% endif %}
     </p>
   </div>
   <div class="header-actions">
     {% if user.id == g.user.id %}
       <span class="sub">This is your account. <a href="{{ url_for('auth.change_password') }}">Change your password</a></span>
+    {% elif user.is_deleted %}
+      <form method="post" action="{{ url_for('employees.restore_employee', user_id=user.id) }}" class="restore-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input name="note" maxlength="500" placeholder="Note (optional), e.g. Rehired" aria-label="Restore note">
+        <button type="submit" class="btn btn-green"
+                data-confirm="Restore {{ user.username }}? They get a new temporary password (shown once) and must choose their own at next login.">Restore employee</button>
+      </form>
     {% else %}
       {% if user.role == 'employee' %}
         <a class="btn btn-secondary" href="{{ url_for('employees.edit_employee', user_id=user.id) }}">Edit</a>
@@ -25,22 +34,45 @@
                   data-confirm="Reset the password for {{ user.username }}? They will be logged out and must use the new temporary password.">Reset password</button>
         </form>
       {% endif %}
-    {% endif %}
-    {% if user.id == g.user.id %}
-    {% elif user.is_active %}
-      <form method="post" action="{{ url_for('employees.deactivate', user_id=user.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-red"
-                data-confirm="Deactivate {{ user.username }}? They will be logged out and unable to log in. Their history is kept.">Deactivate</button>
-      </form>
-    {% else %}
-      <form method="post" action="{{ url_for('employees.activate', user_id=user.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-green">Reactivate</button>
-      </form>
+      {% if user.is_active %}
+        <form method="post" action="{{ url_for('employees.deactivate', user_id=user.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-red"
+                  data-confirm="Deactivate {{ user.username }}? They will be logged out and unable to log in. Their history is kept.">Deactivate</button>
+        </form>
+      {% else %}
+        <form method="post" action="{{ url_for('employees.activate', user_id=user.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-green">Reactivate</button>
+        </form>
+      {% endif %}
+      {% if user.role == 'employee' %}
+        {# A link to the confirmation page; with JavaScript it opens the dialog below instead. #}
+        <a class="btn btn-danger" href="{{ url_for('employees.delete_employee', user_id=user.id) }}"
+           data-open-dialog="delete-dialog">Delete</a>
+      {% endif %}
     {% endif %}
   </div>
 </header>
+
+{% if user.is_deleted %}
+  <section class="callout callout-red">
+    <h2>This account was deleted</h2>
+    <dl class="details">
+      <dt>Deleted</dt><dd>{{ date(user.deleted_at) if user.deleted_at else '—' }}</dd>
+      <dt>Deleted by</dt><dd>{{ user.deleted_by.username if user.deleted_by else '—' }}</dd>
+      <dt>Reason</dt><dd>{{ user.deletion_reason or '—' }}</dd>
+    </dl>
+    <p class="sub">{{ user.username }} can't log in. Their requests and activity below are kept.</p>
+  </section>
+{% endif %}
+
+{% if user.role == 'employee' and not user.is_deleted and user.id != g.user.id %}
+  <dialog id="delete-dialog" class="dialog" aria-labelledby="delete-dialog-title">
+    <h2 id="delete-dialog-title">Delete employee account</h2>
+    {% with employee=user, reason='', error=None %}{% include "_delete_employee_form.html" %}{% endwith %}
+  </dialog>
+{% endif %}
 
 <section class="stats">
   <div class="stat-card">
@@ -72,6 +104,27 @@
     <dt>Password</dt><dd>{{ 'Temporary — must be changed at next login' if user.must_change_password else 'Set by the user' }}</dd>
   </dl>
 </section>
+
+{% if deletion_history %}
+  <section class="panel">
+    <h2>Deletion history</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When (UTC)</th><th>Action</th><th>By</th><th>Details</th></tr></thead>
+        <tbody>
+          {% for entry in deletion_history %}
+            <tr>
+              <td class="nowrap">{{ date(entry.created_at) }}</td>
+              <td class="nowrap">{{ entry.category_label }}</td>
+              <td>{{ entry.actor.username if entry.actor else '—' }}</td>
+              <td class="reason">{{ entry.action }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endif %}
 
 <div class="overview-grid">
   <section class="panel">

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Delete {{ employee.username }}{% endblock %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('employees.profile', user_id=employee.id) }}">← {{ employee.display_name }}</a>
+<section class="panel confirm-box">
+  <h1>Delete employee account</h1>
+  {% include "_delete_employee_form.html" %}
+</section>
+{% endblock %}

@@ -161,3 +161,28 @@ document.querySelectorAll("[data-report-form]").forEach(function (form) {
   if (direction) direction.addEventListener("change", update);
   update();
 });
+
+// ---------------------------------------------------------------------------
+// Pop-up dialogs. A link with data-open-dialog="some-id" opens <dialog id="some-id">
+// instead of following the link. Without JavaScript the link still works (it
+// goes to a normal confirmation page).
+// ---------------------------------------------------------------------------
+document.addEventListener("click", function (event) {
+  const opener = event.target.closest("[data-open-dialog]");
+  if (opener) {
+    const dialog = document.getElementById(opener.dataset.openDialog);
+    if (dialog && typeof dialog.showModal === "function") {
+      event.preventDefault();
+      dialog.showModal();
+      const firstField = dialog.querySelector("textarea, input:not([type=hidden])");
+      if (firstField) firstField.focus();
+    }
+    return;
+  }
+  const closer = event.target.closest("[data-close-dialog]");
+  const openDialog = closer && closer.closest("dialog");
+  if (openDialog) {
+    event.preventDefault();
+    openDialog.close();
+  }
+});

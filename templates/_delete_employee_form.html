@@ -1,0 +1,27 @@
+{# Shared delete form: used inside the profile's pop-up dialog and on the
+   /employees/<id>/delete confirmation page. Expects `employee`, `reason`, `error`. #}
+<form method="post" action="{{ url_for('employees.delete_employee', user_id=employee.id) }}" class="form delete-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <dl class="details">
+    <dt>Full name</dt><dd>{{ employee.full_name or '—' }}</dd>
+    <dt>Username</dt><dd class="mono">{{ employee.username }}</dd>
+    {% if employee.email %}<dt>Email</dt><dd>{{ employee.email }}</dd>{% endif %}
+  </dl>
+
+  <p class="delete-warning">
+    Are you sure you want to delete this employee account? The employee will no longer be able to log in.
+    Their previous inventory activity and request history will be preserved.
+  </p>
+
+  <label for="reason-{{ employee.id }}">Reason for deletion <span class="req">*</span></label>
+  <textarea id="reason-{{ employee.id }}" name="reason" rows="3" maxlength="500" required
+            placeholder="e.g. Employee left the company" class="{{ 'is-invalid' if error }}">{{ reason }}</textarea>
+  {% if error %}<p class="field-error">{{ error }}</p>{% endif %}
+
+  <div class="form-buttons">
+    <button type="submit" class="btn btn-danger">Delete Employee</button>
+    {# Inside the dialog, Cancel just closes it; on the page it goes back. #}
+    <a class="btn btn-secondary" href="{{ url_for('employees.profile', user_id=employee.id) }}" data-close-dialog>Cancel</a>
+  </div>
+</form>

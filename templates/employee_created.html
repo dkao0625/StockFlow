@@ -1,9 +1,13 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Password reset' if was_reset else 'Employee created' }}{% endblock %}
+{% block title %}{{ 'Employee restored' if was_restored else ('Password reset' if was_reset else 'Employee created') }}{% endblock %}
 
 {% block content %}
 <header class="page-header">
-  {% if was_reset %}
+  {% if was_restored %}
+    <h1>Employee restored</h1>
+    <p class="muted">{{ employee.display_name }} ({{ employee.username }}) is active again and can log in with the temporary password below.
+      They must choose their own password at their next login. Their earlier deletion stays in the account history.</p>
+  {% elif was_reset %}
     <h1>Password reset</h1>
     <p class="muted">{{ employee.display_name }} has been logged out everywhere and must choose a new password at their next login.</p>
   {% else %}
@@ -27,7 +31,7 @@
 
 <div class="header-actions">
   <a class="btn btn-primary" href="{{ url_for('employees.profile', user_id=employee.id) }}">View employee</a>
-  {% if not was_reset %}<a class="btn btn-secondary" href="{{ url_for('employees.new_employee') }}">+ Add another</a>{% endif %}
+  {% if not was_reset and not was_restored %}<a class="btn btn-secondary" href="{{ url_for('employees.new_employee') }}">+ Add another</a>{% endif %}
   <a class="btn btn-link" href="{{ url_for('employees.employee_list') }}">Back to Employees</a>
 </div>
 {% endblock %}
