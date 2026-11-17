@@ -483,3 +483,33 @@ tr.row-attention td { background: #fff9f2; }
 .row-actions { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
 .row-actions form { display: inline; }
 .header-actions form { display: inline; }
+
+/* ---------- My Profile ---------- */
+
+.avatar {
+  display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 50%;
+  background: var(--primary); color: #fff; font-weight: 700; letter-spacing: 0.5px;
+}
+.avatar-small { width: 32px; height: 32px; font-size: 12px; }
+.avatar-large { width: 72px; height: 72px; font-size: 26px; }
+
+/* Sidebar: username + role is one link to My Profile */
+.sidebar-profile {
+  display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;
+  margin: -6px; padding: 6px; border-radius: 8px;
+  color: #fff; text-decoration: none; cursor: pointer;
+}
+.sidebar-profile:hover, .sidebar-profile.active { background: var(--navy-light); }
+.sidebar-profile:focus-visible { outline: 2px solid #5b8cff; outline-offset: 2px; }
+.sidebar-profile-text { display: flex; flex-direction: column; min-width: 0; }
+.sidebar-profile .user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-profile .chevron { margin-left: auto; color: var(--navy-text); font-size: 18px; line-height: 1; }
+.sidebar-profile:hover .chevron { color: #fff; }
+
+.profile-header { display: flex; align-items: center; gap: 20px; }
+.profile-header h1 { margin-bottom: 6px; }
+.profile-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.badge-gray { background: #eef1f6; color: var(--muted); }
+.section-gap-small { margin-top: 12px; }
+.form-buttons { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+.form .form-buttons .btn { margin-top: 0; }

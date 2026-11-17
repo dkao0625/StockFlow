@@ -30,6 +30,7 @@ from restock import restock_bp
 from activity import activity_bp
 from employees import employees_bp
 from reports import reports_bp
+from account import profile_bp
 from models import ROLE_MANAGER, Product, User, db, log_activity
 
 # Read variables from a local .env file (if present) into os.environ.
@@ -123,6 +124,7 @@ def create_app(test_config=None):
     app.register_blueprint(activity_bp)
     app.register_blueprint(employees_bp)
     app.register_blueprint(reports_bp)
+    app.register_blueprint(profile_bp)
 
     @app.context_processor
     def inject_site_name():

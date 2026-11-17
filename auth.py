@@ -235,7 +235,8 @@ def change_password():
             error = password_problem(new, g.user.username)
         if error:
             flash(error, "error")
-            return render_template("change_password.html", first_time=first_time), 400
+            return render_template("change_password.html", first_time=first_time,
+                                   next_url=back_to_page_or("")), 400
 
         g.user.set_password(new)  # stored hashed
         g.user.must_change_password = False
@@ -249,7 +250,17 @@ def change_password():
             category="account", target_user_id=g.user.id,
         )
         db.session.commit()
-        flash("Your password was changed.", "success")
-        return redirect(home_for(g.user))
+        flash("Your password was changed. You've been logged out on other devices.", "success")
+        if first_time:
+            return redirect(home_for(g.user))
+        return redirect(back_to_page_or(home_for(g.user)))
 
-    return render_template("change_password.html", first_time=first_time)
+    return render_template("change_password.html", first_time=first_time, next_url=back_to_page_or(""))
+
+
+def back_to_page_or(default):
+    """The ?next= page to return to, but only a page on THIS site (never another website)."""
+    next_url = request.values.get("next", "")
+    if next_url.startswith("/") and not next_url.startswith("//") and "\\" not in next_url:
+        return next_url
+    return default

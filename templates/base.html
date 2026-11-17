@@ -51,11 +51,17 @@
     </nav>
 
     <div class="sidebar-user">
-      <div>
-        <div class="user-name">{{ g.user.username }}</div>
-        <div class="user-role">{{ g.user.role|capitalize }} ·
-          <a class="user-link" href="{{ url_for('auth.change_password') }}">Change password</a></div>
-      </div>
+      {# The whole name/role area is one link to My Profile (a real link, so it
+         works with the keyboard and screen readers). Log out stays separate. #}
+      <a class="sidebar-profile {{ 'active' if endpoint.startswith('profile.') }}" href="{{ url_for('profile.my_profile') }}"
+         title="My profile" aria-label="My profile: {{ g.user.display_name }}, {{ g.user.role }}">
+        <span class="avatar avatar-small" aria-hidden="true">{{ g.user.initials }}</span>
+        <span class="sidebar-profile-text">
+          <span class="user-name">{{ g.user.username }}</span>
+          <span class="user-role">{{ g.user.role|capitalize }}</span>
+        </span>
+        <span class="chevron" aria-hidden="true">›</span>
+      </a>
       <form method="post" action="{{ url_for('auth.logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-ghost">Log out</button>

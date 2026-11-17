@@ -68,6 +68,17 @@ The same queue handles **bulk stock adjustments** (increases and decreases), **d
 4. When the delivery arrives, a manager opens **Restock orders** (from Stock Alerts) and clicks **Receive stock** with the number of units that actually came. Inventory goes up, a stock movement and a receipt are recorded, and the request becomes **Partially Received** or **Received**.
 5. You can't receive more than is still expected. Extra units must be added separately with **Add stock** on the product page (with a note). If the rest will never arrive, **Close order** (requires a note) stops waiting without changing stock.
 
+## My Profile (everyone)
+
+Click your name at the bottom of the sidebar to open **My Profile** (`/profile`). It always shows the account that is logged in. There's no user id in the URL, so nobody can open or change another person's profile.
+
+- **Header:** initials avatar, name (or username if no name is set), username, role, and status
+- **Personal information:** full name, username, email, role, account created, last login. **Edit profile** changes your full name and email only (email must be valid and not used by another account). Username, role, and status are changed only by a manager.
+- **Account security:** **Change password** asks for your current password, checks the new one (10+ characters, a letter and a number, not containing your username), stores it hashed, and logs you out on your other devices.
+- **Recent activity:** your 5 latest actions, with a link to **My Activity**
+
+Profile updates and password changes are written to the activity log without the personal details or passwords themselves.
+
 ## Employee pages
 
 | Page | What it shows |
@@ -126,13 +137,14 @@ alerts.py           Stock Alerts and reorder/target level settings
 restock.py          Restock requests, Restock orders, Receive stock, Close order
 activity.py         Activity log, My Activity, activity CSV export
 employees.py        Employees list and profiles; create, edit, reset password, activate/deactivate
+account.py          My Profile (/profile) and Edit profile for the logged-in user
 reports.py          Reports page and movement/request CSV exports
 csv_export.py       Safe CSV downloads (formula-injection protection, safe filenames)
 products.py         Add / edit / view products and add stock; product form validation and permissions
 bulk.py             Bulk edit, bulk stock adjustment, and bulk delete (archive)
 stock.py            Shared row-locked stock changes and archiving rules used by every route
 migrations/         Flask-Migrate (Alembic) migration scripts; versions/ holds one file per schema change
-templates/          base, login, change_password, employee_form, employee_created, employee_edit, inventory, product, product_form, bulk_edit, bulk_adjust,
+templates/          base, login, change_password, profile, profile_edit, employee_form, employee_created, employee_edit, inventory, product, product_form, bulk_edit, bulk_adjust,
                     bulk_archive, employee, my_requests, overview, approvals, request_detail, alerts, restock_form,
                     restock_orders, activity, employees, employee_profile, reports, error, _macros
 static/style.css    All styling
@@ -249,6 +261,8 @@ With `DATABASE_URL_TEST` blank, the tests use a temporary SQLite file and need n
 - **Corrections (`test_corrections.py`):** the full report → correction → resubmit → approve flow, notes required, only Pending can be sent back, only the owner can resubmit and only from Needs Correction, validation, duplicate approval, restock and archive corrections, archive blocking, and the My Requests filters and search.
 - **Request types (`test_request_types.py`):** every Report a problem type, count corrections calculated from the stock at approval time (browser values ignored), counts of 0, adjustments with matching reasons, restock through the shared workflow, issues never changing stock, and unknown types rejected.
 - **Employee access (`test_employee_access.py`):** permitted inventory editing and bulk actions (recorded under the employee), 23 manager-only routes refused, Stock Alerts as an employee, and My Activity with related requests.
+- **My Profile (`test_profile.py`):** both roles see only their own profile (ids in the URL are ignored), placeholders for missing details, recent activity, the sidebar link, editing your own name and email (role, status, username, and other users can't be changed), validation and duplicate emails, and changing your password from the profile (current password required, other sessions logged out, no off-site redirects).
+- **Accounts and passwords (`test_accounts.py`, `test_password_management.py`):** no public sign-up, manager-created employees, validation and duplicates, first-login password change enforced on every route, password reset, and editing employees.
 - **Reports and CSV (`test_reports.py`):** manager-only reports and exports, movement and request totals by date range, exports respecting filters, formula-injection protection, and no secrets in any export.
 
 **Row locking** (`SELECT … FOR UPDATE`) only takes effect on PostgreSQL. `tests/test_concurrency.py` fires two simultaneous approvals and is skipped unless you point it at a **throwaway** Postgres database. In Neon, create a separate branch (Branches → New branch, e.g. `test`) and use its connection string:
@@ -284,6 +298,9 @@ Run locally against the **dev** branch (`flask --app app run --debug`). Use two 
 | First login | Log in as the new employee with the temporary password | Only the Choose your password page works until a new password is saved |
 | Reset password | Manager: Employees → **Reset password** (confirm) | New temporary password shown once; the employee is logged out and must change it at next login |
 | No public sign-up | Visit `/register` | 404 Page not found |
+| My Profile | Click your name at the bottom of the sidebar (as an employee and as a manager) | Your own details, initials avatar, and 5 latest actions |
+| Edit profile | My Profile → **Edit profile** → change name and email → Save | "Your profile was updated." and the new values; try another account's email to see the error |
+| Change password | My Profile → **Change password** | Wrong current password is rejected; after saving you return to My Profile and other browsers are logged out |
 
 ## Deploying to Google Cloud Run
 

@@ -122,6 +122,14 @@ class User(db.Model):
     def display_name(self):
         return self.full_name or self.username
 
+    @property
+    def initials(self):
+        """Avatar letters: "Dana Lee" -> "DL", "dylankao" -> "DY"."""
+        words = (self.full_name or "").split()
+        if len(words) >= 2:
+            return (words[0][0] + words[-1][0]).upper()
+        return self.display_name[:2].upper()
+
 
 class Product(db.Model):
     __tablename__ = "products"

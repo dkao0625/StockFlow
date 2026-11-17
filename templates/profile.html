@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "_macros.html" import date %}
+{% block title %}My profile{% endblock %}
+
+{% block content %}
+{# Everything here is the LOGGED-IN user's own account (g.user). #}
+
+<section class="panel profile-header">
+  <span class="avatar avatar-large" aria-hidden="true">{{ user.initials }}</span>
+  <div>
+    <h1>{{ user.display_name }}</h1>
+    <p class="muted profile-meta">
+      <span class="mono">{{ user.username }}</span>
+      <span class="badge {{ 'badge-blue' if user.is_manager else 'badge-gray' }}">{{ user.role|capitalize }}</span>
+      {% if user.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-red">Inactive</span>{% endif %}
+    </p>
+  </div>
+</section>
+
+<div class="grid-2">
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Personal information</h2>
+      <a class="btn btn-secondary btn-small" href="{{ url_for('profile.edit_profile') }}">Edit profile</a>
+    </div>
+    <dl class="details">
+      <dt>Full name</dt><dd>{{ user.full_name or 'Not set' }}</dd>
+      <dt>Username</dt><dd class="mono">{{ user.username }}</dd>
+      <dt>Email</dt><dd>{{ user.email or 'Not set' }}</dd>
+      <dt>Role</dt><dd>{{ user.role|capitalize }}</dd>
+      <dt>Account created</dt><dd>{{ date(user.created_at) if user.created_at else 'Unknown' }}</dd>
+      <dt>Last login</dt><dd>{{ date(user.last_login_at) if user.last_login_at else 'Not recorded yet' }}</dd>
+    </dl>
+    <p class="hint">Your username, role, and account status can only be changed by a manager.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Account security</h2>
+    <p class="muted">Changing your password logs you out on every other device.</p>
+    <a class="btn btn-secondary section-gap-small" href="{{ url_for('auth.change_password', next=url_for('profile.my_profile')) }}">Change password</a>
+  </section>
+</div>
+
+<section class="panel section-gap">
+  <div class="panel-header">
+    <h2>Recent activity</h2>
+    <a class="btn btn-link" href="{{ url_for('activity.my_activity') }}">View all activity →</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When (UTC)</th><th>Action</th><th>Description</th></tr></thead>
+      <tbody>
+        {% for entry in recent_activity %}
+          <tr>
+            <td class="nowrap sub">{{ date(entry.created_at) }}</td>
+            <td class="nowrap">{{ entry.category_label }}</td>
+            <td class="reason">{{ entry.action }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="empty">Nothing yet — your actions in {{ site_name }} will show up here.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
