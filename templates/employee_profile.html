@@ -15,17 +15,28 @@
   </div>
   <div class="header-actions">
     {% if user.id == g.user.id %}
-      <span class="sub">This is your account.</span>
+      <span class="sub">This is your account. <a href="{{ url_for('auth.change_password') }}">Change your password</a></span>
+    {% else %}
+      {% if user.role == 'employee' %}
+        <a class="btn btn-secondary" href="{{ url_for('employees.edit_employee', user_id=user.id) }}">Edit</a>
+        <form method="post" action="{{ url_for('employees.reset_password', user_id=user.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-secondary"
+                  data-confirm="Reset the password for {{ user.username }}? They will be logged out and must use the new temporary password.">Reset password</button>
+        </form>
+      {% endif %}
+    {% endif %}
+    {% if user.id == g.user.id %}
     {% elif user.is_active %}
-      <form method="post" action="{{ url_for('employees.deactivate', user_id=user.id) }}"
-            onsubmit="return confirm('Deactivate {{ user.username }}? They will be logged out and unable to log in.');">
+      <form method="post" action="{{ url_for('employees.deactivate', user_id=user.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-red">Deactivate account</button>
+        <button type="submit" class="btn btn-red"
+                data-confirm="Deactivate {{ user.username }}? They will be logged out and unable to log in. Their history is kept.">Deactivate</button>
       </form>
     {% else %}
       <form method="post" action="{{ url_for('employees.activate', user_id=user.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-green">Reactivate account</button>
+        <button type="submit" class="btn btn-green">Reactivate</button>
       </form>
     {% endif %}
   </div>

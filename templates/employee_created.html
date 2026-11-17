@@ -1,17 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Employee created{% endblock %}
+{% block title %}{{ 'Password reset' if was_reset else 'Employee created' }}{% endblock %}
 
 {% block content %}
 <header class="page-header">
-  <h1>Employee created</h1>
-  <p class="muted">{{ employee.full_name }} can now log in as <strong>{{ employee.username }}</strong> or <strong>{{ employee.email }}</strong>.</p>
+  {% if was_reset %}
+    <h1>Password reset</h1>
+    <p class="muted">{{ employee.display_name }} has been logged out everywhere and must choose a new password at their next login.</p>
+  {% else %}
+    <h1>Employee created</h1>
+    <p class="muted">{{ employee.full_name }} can now log in as <strong>{{ employee.username }}</strong> or <strong>{{ employee.email }}</strong>.</p>
+  {% endif %}
 </header>
 
 {% if temporary_password %}
   <section class="callout callout-orange">
     <h2>Temporary password</h2>
     <p class="temp-password mono">{{ temporary_password }}</p>
-    <p>Give this to {{ employee.full_name }} privately. <strong>It is shown only this once</strong> and can't be looked up later.
+    <p>Give this to {{ employee.display_name }} privately. <strong>It is shown only this once</strong> and can't be looked up later.
       They will have to choose a new password when they first log in.</p>
   </section>
 {% else %}
@@ -22,7 +27,7 @@
 
 <div class="header-actions">
   <a class="btn btn-primary" href="{{ url_for('employees.profile', user_id=employee.id) }}">View employee</a>
-  <a class="btn btn-secondary" href="{{ url_for('employees.new_employee') }}">+ Add another</a>
+  {% if not was_reset %}<a class="btn btn-secondary" href="{{ url_for('employees.new_employee') }}">+ Add another</a>{% endif %}
   <a class="btn btn-link" href="{{ url_for('employees.employee_list') }}">Back to Employees</a>
 </div>
 {% endblock %}

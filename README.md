@@ -23,7 +23,7 @@ In many small warehouses, damaged or missing stock gets reported verbally or on 
 | Fix and **resubmit** requests a manager sent back | View all requests, request history, and the full **Activity** log |
 | See **their own** requests (**My Requests**) and **My Activity** | |
 | View **Stock Alerts** (read-only) and **request a restock** | Set reorder/target levels, authorize restocks, and **Receive stock** when it arrives |
-| | **Overview** dashboard, **Employees** (activate/deactivate accounts), **Reports**, and **CSV exports** |
+| | **Overview** dashboard, **Employees** (create, edit, reset passwords, activate/deactivate accounts), **Reports**, and **CSV exports** |
 
 Employees never change stock quantities or archive products themselves. Every one of those actions becomes a Pending request in the manager's queue. All of these rules are checked in the Flask routes, so hand-crafted requests get HTTP 403.
 
@@ -87,7 +87,7 @@ The same queue handles **bulk stock adjustments** (increases and decreases), **d
 | **Stock Alerts** (`/alerts`) | Low and out-of-stock products with search, sorting, reorder level, target level, suggested reorder quantity, and units already on order. Managers can change reorder/target levels here. |
 | **Restock orders** (`/restock`) | Restocks awaiting delivery, pending, or received, with **Receive stock** and **Close order**. |
 | **Activity** (`/activity`) | Every logged action with user, role, action type, product or account, description, and quantity change. Search, date range, action type, user and role filters, pages of 50, and CSV export. Entries can't be edited or deleted. |
-| **Employees** (`/employees`) | All accounts with role, status, join date, request count, and last activity. Profiles show requests and activity. Managers can deactivate/reactivate accounts. |
+| **Employees** (`/employees`) | All accounts with name, username, email, role, status, created date, last login, and request count; search by name, username, or email. **+ Add employee**, **Edit**, **Reset password**, and **Deactivate / Activate**. Profiles show requests and activity. |
 | **Reports** (`/reports`) | Inventory summary (now), stock movements in a date range (added, removed, damaged/missing, by day), and employee requests in that range (by status, employee, and type). Simple CSS bar charts. |
 
 **CSV exports** (managers only): inventory, stock alerts, approvals, activity, stock movements, and requests. Each export uses the filters of the page it comes from.
@@ -118,21 +118,21 @@ Every bulk action is saved in **one database transaction**: if any row is invali
 ```text
 app.py              App factory, configuration, CLI commands (create-manager, seed-demo)
 models.py           Database tables: User, Product, InventoryRequest, RequestEvent, StockMovement, StockReceipt, ActivityLog
-auth.py             Register / login / logout, and the login_required / manager_required decorators
+auth.py             Login / logout, first-login and voluntary password change, password rules, and the login_required / manager_required decorators
 inventory.py        Inventory, employee dashboard, Report a problem, My Requests, Approvals, request details,
                     approve / reject / request-correction / resubmit logic, CSV exports
 manager.py          Manager Overview dashboard
 alerts.py           Stock Alerts and reorder/target level settings
 restock.py          Restock requests, Restock orders, Receive stock, Close order
 activity.py         Activity log, My Activity, activity CSV export
-employees.py        Employees list, profiles, activate/deactivate
+employees.py        Employees list and profiles; create, edit, reset password, activate/deactivate
 reports.py          Reports page and movement/request CSV exports
 csv_export.py       Safe CSV downloads (formula-injection protection, safe filenames)
 products.py         Add / edit / view products and add stock; product form validation and permissions
 bulk.py             Bulk edit, bulk stock adjustment, and bulk delete (archive)
 stock.py            Shared row-locked stock changes and archiving rules used by every route
 migrations/         Flask-Migrate (Alembic) migration scripts; versions/ holds one file per schema change
-templates/          base, login, register, inventory, product, product_form, bulk_edit, bulk_adjust,
+templates/          base, login, change_password, employee_form, employee_created, employee_edit, inventory, product, product_form, bulk_edit, bulk_adjust,
                     bulk_archive, employee, my_requests, overview, approvals, request_detail, alerts, restock_form,
                     restock_orders, activity, employees, employee_profile, reports, error, _macros
 static/style.css    All styling
@@ -200,8 +200,9 @@ StockFlow uses **Flask-Migrate** (built on Alembic). Each schema change is a num
 | `0007_request_corrections` | Allows the `Needs Correction` status, adds `updated_at` to `inventory_requests` (existing rows get their `created_at`), and adds the `request_events` table (request history). |
 | `0008_count_and_issue_requests` | Adds `counted_quantity` and `additional_notes` to `inventory_requests`, and allows the `count` and `issue` request types and the `Other` reason. |
 | `0009_activity_request_link` | Adds `request_id` to `activity_logs`. Existing entries are linked only when their text names an existing request for the same product. |
+| `0010_manager_created_accounts` | Adds `full_name`, `email` (unique), `must_change_password` (false for existing accounts), and `last_login_at` (filled from the latest login entry) to `users`. |
 
-Migrations `0004`–`0009` only **add** columns, tables, and indexes, or replace CHECK rules with **wider** ones; nothing is dropped or deleted.
+Migrations `0004`–`0010` only **add** columns, tables, and indexes, or replace CHECK rules with **wider** ones; nothing is dropped or deleted.
 
 Useful commands:
 
@@ -224,7 +225,7 @@ Migrations only ever *add* to the existing tables. The baseline migration refuse
 flask --app app run --debug
 ```
 
-Open <http://127.0.0.1:5001>, register an employee account, and try the workflow.
+Open <http://127.0.0.1:5001>, log in as the manager, create an employee on **Employees → + Add employee**, and try the workflow.
 
 ## Running tests
 
@@ -234,7 +235,7 @@ pytest
 
 With `DATABASE_URL_TEST` blank, the tests use a temporary SQLite file and need no Neon (about 40 seconds). With it set to a Neon `test` branch they run on real PostgreSQL, including the row-locking tests (much slower, because every test talks to Neon over the network). To force SQLite for a quick check: `DATABASE_URL_TEST= pytest`. They cover:
 
-- **Accounts and access:** registration (which always creates an employee), login, the login requirement on every page, employees being blocked from manager routes (HTTP 403), employees not seeing each other's requests, logout invalidating a copied session cookie, and CSRF rejection.
+- **Accounts and access:** public registration being gone, login, the login requirement on every page, employees being blocked from manager routes (HTTP 403), employees not seeing each other's requests, logout invalidating a copied session cookie, and CSRF rejection.
 - **Requests:** invalid quantities, approval subtracting stock, double approval, rejection leaving stock alone, and the insufficient-stock check.
 - **Products:** product creation with every field, and missing or invalid fields (duplicate SKUs, negative numbers, bad costs, unknown dropdown values, overly long text). Employees edit permitted fields but get 403 for quantity, reorder level, unit cost, and restocking. Also unit cost being hidden from employees, and the In / Low / Out of Stock rules.
 - **Bulk actions (`tests/test_bulk.py`):** Select All respecting filters, bulk-editing only the switched-on fields, unselected products staying unchanged, employee stock adjustments becoming Pending requests, manager approval updating stock, all-or-nothing bulk approval, deletion requests and manager approval archiving products, archive blocking, history staying accessible, and permission bypass attempts.
@@ -262,7 +263,7 @@ You can also set `DATABASE_URL_TEST` in `.env`; leave it blank to test on SQLite
 
 ## Manual test guide
 
-Run locally against the **dev** branch (`flask --app app run --debug`). Use two browsers (or a normal and a private window) so an employee and a manager can be logged in at the same time. If the dev database is empty, register an employee and run `flask --app app seed-demo`.
+Run locally against the **dev** branch (`flask --app app run --debug`). Use two browsers (or a normal and a private window) so an employee and a manager can be logged in at the same time. If the dev database is empty, create an employee from **Employees → + Add employee** and run `flask --app app seed-demo`.
 
 | Feature | Try this | You should see |
 |---|---|---|
@@ -279,6 +280,10 @@ Run locally against the **dev** branch (`flask --app app run --debug`). Use two 
 | Manager-only pages | Employee: visit `/overview` or `/approvals` | 403 "You don't have permission" |
 | My Activity | Employee: My Activity | Your actions with the related request and its current status; no logins |
 | Deactivation | Manager: Employees → profile → Deactivate | The employee's open session is logged out on their next click |
+| Add employee | Manager: Employees → **+ Add employee** → generate password | The temporary password is shown once; the account shows "Temporary password" |
+| First login | Log in as the new employee with the temporary password | Only the Choose your password page works until a new password is saved |
+| Reset password | Manager: Employees → **Reset password** (confirm) | New temporary password shown once; the employee is logged out and must change it at next login |
+| No public sign-up | Visit `/register` | 404 Page not found |
 
 ## Deploying to Google Cloud Run
 
@@ -336,6 +341,9 @@ Notes:
 - Quantities, reasons, notes, usernames, and every product field (required fields, lengths, dropdown values, money format) are validated on the server.
 - The database has CHECK constraints (`quantity >= 0` and `unit_cost >= 0` on products, valid category/unit/status/role values, `quantity > 0` on requests). SKUs are UNIQUE, and a request can create at most one stock movement (also UNIQUE).
 - Unit cost is only shown to managers.
+- **No public sign-up.** Employee accounts are created only by managers (the role is always set to Employee on the server); manager accounts only with `flask create-manager`. The old `/register` URL returns 404.
+- New accounts and password resets use a **temporary password** (generated with Python's `secrets` module, shown once, never logged or put in a cookie). Until the user chooses their own password, every page except Change password and Log out is blocked on the server.
+- New passwords need at least 10 characters with a letter and a number, and can't contain the username. Changing a password logs out the user's other sessions; a manager reset logs out all of them.
 - Deactivated accounts can't log in, and any session they already have is rejected on its next request. Managers can't deactivate themselves or the last active manager (checked with row locks). Managers can't see or set passwords, and nobody can become a manager through the website.
 - The activity log is append-only: no route edits or deletes entries, and a SQLAlchemy hook refuses to save changes to existing entries. Nothing secret (passwords, session data, keys) is written to it.
 - CSV exports are manager-only, never include password hashes or secrets, and prefix any cell starting with `=`, `+`, `-`, `@`, tab, or carriage return with `'` so spreadsheets can't run it as a formula.
@@ -344,7 +352,7 @@ Notes:
 ## Checkpoint status (HW6)
 
 **Completed**
-- Employee registration, login, and logout. The first manager is created with the CLI command.
+- Login and logout. (Public registration was replaced by manager-created accounts in the final project.) The first manager is created with the CLI command.
 - Inventory dashboard with stock status badges and summary cards
 - Employees and managers can add products with full details: category, unit, description, location, and supplier. Only managers can set or see unit cost. The form is split into three sections, with errors shown next to each field.
 - Employees and managers can edit product details. Reorder level and unit cost are manager-only, and quantity only changes through stock movements.
@@ -374,6 +382,14 @@ Notes:
 - Expanded, append-only **Activity** log with categories, roles, quantity changes, filters, pages, and CSV
 - **Employees** page: profiles, request counts, last activity, activate/deactivate
 - **Reports** with simple charts, and **CSV exports** for inventory, alerts, requests, activity, and movements
+
+## Final project: manager-controlled accounts
+
+- Public registration removed; managers create employee accounts (**+ Add employee**) with a generated or typed temporary password
+- Employees must choose their own password at first login (enforced on the server)
+- Managers can **edit** employee info, **reset passwords** (shown once, logs the employee out), and activate/deactivate accounts
+- Log in with username **or** email; last login is shown on the Employees page
+- Migration `0010` adds `full_name`, `email` (unique), `must_change_password`, and `last_login_at` to `users`; existing accounts keep their passwords and aren't forced to change them
 
 ## Final project: employee workspace
 

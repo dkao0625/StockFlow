@@ -18,6 +18,7 @@
 
     <nav class="nav">
       {% set endpoint = request.endpoint or '' %}
+      {% if not g.user.must_change_password %}
       {% if g.user.is_manager %}
         <a href="{{ url_for('manager.overview') }}"
            class="{{ 'active' if endpoint == 'manager.overview' }}">Overview</a>
@@ -46,12 +47,14 @@
         <a href="{{ url_for('activity.my_activity') }}"
            class="{{ 'active' if endpoint == 'activity.my_activity' }}">My Activity</a>
       {% endif %}
+      {% endif %}{# (menu hidden until a temporary password is changed) #}
     </nav>
 
     <div class="sidebar-user">
       <div>
         <div class="user-name">{{ g.user.username }}</div>
-        <div class="user-role">{{ g.user.role|capitalize }}</div>
+        <div class="user-role">{{ g.user.role|capitalize }} ·
+          <a class="user-link" href="{{ url_for('auth.change_password') }}">Change password</a></div>
       </div>
       <form method="post" action="{{ url_for('auth.logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

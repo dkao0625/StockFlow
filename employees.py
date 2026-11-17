@@ -324,3 +324,90 @@ def activate(user_id):
     db.session.commit()
     flash(f"{target.username} can log in again.", "success")
     return redirect(back)
+
+
+# ---------------------------------------------------------------------------
+# Reset password and edit (employee accounts only)
+# ---------------------------------------------------------------------------
+
+def employee_account_or_404(user_id):
+    """The user, if it is an EMPLOYEE account. Managers' accounts can't be reset or edited here."""
+    user = db.get_or_404(User, user_id)
+    if user.role != ROLE_EMPLOYEE:
+        abort(403)
+    return user
+
+
+@employees_bp.route("/<int:user_id>/reset-password", methods=["POST"])
+@manager_required
+def reset_password(user_id):
+    """
+    Give the employee a NEW temporary password (shown once), log them out
+    everywhere, and make them choose their own password at next login.
+    The manager never sees the old password -- only the new temporary one.
+    """
+    employee = employee_account_or_404(user_id)
+    temporary_password = generate_temporary_password()
+    employee.set_password(temporary_password)  # stored hashed
+    employee.must_change_password = True
+    employee.session_version += 1              # ends every session they have open
+    log_activity(
+        g.user.id, f"Reset the password for employee '{employee.username}'",
+        category="account", target_user_id=employee.id,
+    )
+    db.session.commit()
+    return no_store(make_response(render_template(
+        "employee_created.html", employee=employee, temporary_password=temporary_password, was_reset=True,
+    )))
+
+
+@employees_bp.route("/<int:user_id>/edit", methods=["GET", "POST"])
+@manager_required
+def edit_employee(user_id):
+    """Change an employee's name, username, email, or status. Never the role."""
+    employee = employee_account_or_404(user_id)
+    if request.method == "GET":
+        values = {"full_name": employee.full_name or "", "username": employee.username,
+                  "email": employee.email or "", "is_active": employee.is_active}
+        return render_template("employee_edit.html", employee=employee, values=values, errors={})
+
+    values, errors = read_account_form(request.form, existing_user=employee)
+    values["is_active"] = request.form.get("is_active") == "1"
+    if errors:
+        return render_template("employee_edit.html", employee=employee, values=values, errors=errors), 400
+
+    # Describe what changed (emails are personal, so only say that it changed).
+    changes = []
+    if values["full_name"] != (employee.full_name or ""):
+        changes.append(f"name '{employee.full_name or ''}' → '{values['full_name']}'")
+    if values["username"] != employee.username:
+        changes.append(f"username '{employee.username}' → '{values['username']}'")
+    if values["email"] != (employee.email or ""):
+        changes.append("email updated")
+    if values["is_active"] != employee.is_active:
+        changes.append("reactivated" if values["is_active"] else "deactivated")
+    if not changes:
+        flash("Nothing changed.", "warning")
+        return redirect(url_for("employees.profile", user_id=employee.id))
+
+    old_username = employee.username
+    employee.full_name = values["full_name"]
+    employee.username = values["username"]
+    employee.email = values["email"]
+    if values["is_active"] != employee.is_active:
+        employee.is_active = values["is_active"]
+        if not employee.is_active:
+            employee.session_version += 1  # log them out right away
+    try:
+        log_activity(
+            g.user.id, f"Updated employee '{old_username}': {', '.join(changes)}",
+            category="account", target_user_id=employee.id,
+        )
+        db.session.commit()  # UNIQUE constraints are checked here too
+    except IntegrityError:
+        db.session.rollback()
+        errors["username"] = "That username or email was just taken. Choose another."
+        return render_template("employee_edit.html", employee=employee, values=values, errors=errors), 400
+
+    flash(f"Saved: {', '.join(changes)}.", "success")
+    return redirect(url_for("employees.profile", user_id=employee.id))

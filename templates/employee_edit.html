@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ employee.username }}{% endblock %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('employees.profile', user_id=employee.id) }}">← {{ employee.display_name }}</a>
+<header class="page-header">
+  <h1>Edit employee</h1>
+  <p class="muted">The role stays <strong>Employee</strong>. To change the password, use <em>Reset password</em> on the profile.</p>
+</header>
+
+<section class="panel account-form">
+  <form method="post" class="form" data-submit-once novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="full_name">Full name <span class="req">*</span></label>
+    <input id="full_name" name="full_name" maxlength="100" required value="{{ values.full_name }}"
+           class="{{ 'is-invalid' if errors.full_name }}">
+    {% if errors.full_name %}<p class="field-error">{{ errors.full_name }}</p>{% endif %}
+
+    <div class="row">
+      <div>
+        <label for="username">Username <span class="req">*</span></label>
+        <input id="username" name="username" maxlength="30" required autocomplete="off" value="{{ values.username }}"
+               class="{{ 'is-invalid' if errors.username }}">
+        {% if errors.username %}<p class="field-error">{{ errors.username }}</p>{% endif %}
+      </div>
+      <div>
+        <label for="email">Email <span class="req">*</span></label>
+        <input id="email" name="email" type="email" maxlength="254" required autocomplete="off" value="{{ values.email }}"
+               class="{{ 'is-invalid' if errors.email }}">
+        {% if errors.email %}<p class="field-error">{{ errors.email }}</p>{% endif %}
+      </div>
+    </div>
+
+    <label for="is_active">Account status</label>
+    <select id="is_active" name="is_active">
+      <option value="1" {{ 'selected' if values.is_active }}>Active</option>
+      <option value="0" {{ 'selected' if not values.is_active }}>Inactive (can't log in)</option>
+    </select>
+
+    <button type="submit" class="btn btn-primary" data-busy-text="Saving…">Save changes</button>
+  </form>
+</section>
+{% endblock %}

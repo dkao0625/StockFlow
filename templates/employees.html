@@ -66,7 +66,33 @@
             <td class="nowrap">{{ date(user.last_login_at) if user.last_login_at else 'Never' }}</td>
             <td class="num">{{ request_counts.get(user.id, 0) }}</td>
             <td class="actions-col">
-              <a class="btn btn-secondary btn-small" href="{{ url_for('employees.profile', user_id=user.id) }}">View</a>
+              <div class="row-actions">
+                <a class="btn btn-secondary btn-small" href="{{ url_for('employees.profile', user_id=user.id) }}">View</a>
+                {% if user.role == 'employee' %}
+                  <a class="btn btn-secondary btn-small" href="{{ url_for('employees.edit_employee', user_id=user.id) }}">Edit</a>
+                  <form method="post" action="{{ url_for('employees.reset_password', user_id=user.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-secondary btn-small"
+                            data-confirm="Reset the password for {{ user.username }}? They will be logged out and must use the new temporary password.">Reset password</button>
+                  </form>
+                {% endif %}
+                {% if user.id != g.user.id %}
+                  {% if user.is_active %}
+                    <form method="post" action="{{ url_for('employees.deactivate', user_id=user.id) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+                      <button type="submit" class="btn btn-red btn-small"
+                              data-confirm="Deactivate {{ user.username }}? They will be logged out and unable to log in.">Deactivate</button>
+                    </form>
+                  {% else %}
+                    <form method="post" action="{{ url_for('employees.activate', user_id=user.id) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+                      <button type="submit" class="btn btn-green btn-small">Activate</button>
+                    </form>
+                  {% endif %}
+                {% endif %}
+              </div>
             </td>
           </tr>
         {% else %}

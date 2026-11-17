@@ -478,3 +478,8 @@ tr.row-attention td { background: #fff9f2; }
 .password-choice .toggle { font-weight: 500; margin: 6px 0; }
 .auto-fields { margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; }
 .temp-password { font-size: 22px; font-weight: 700; letter-spacing: 1px; margin: 8px 0; user-select: all; }
+.user-link { color: var(--navy-text); font-size: 12px; }
+.user-link:hover { color: #fff; }
+.row-actions { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
+.row-actions form { display: inline; }
+.header-actions form { display: inline; }

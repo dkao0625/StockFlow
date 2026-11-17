@@ -82,6 +82,19 @@ def load_logged_in_user():
 
     g.user = user
 
+    # Temporary password (new account, or reset by a manager): until the user
+    # picks their own, the ONLY things they can do are change it or log out.
+    # This runs before every view on the server, so typing another URL or
+    # sending a request directly can't skip it.
+    if user.must_change_password and request.endpoint not in PASSWORD_CHANGE_ALLOWED:
+        if request.method == "GET":
+            flash("Please choose a new password before continuing.", "warning")
+        return redirect(url_for("auth.change_password"))
+
+
+# Pages a user with a temporary password may still use.
+PASSWORD_CHANGE_ALLOWED = {"auth.change_password", "auth.logout", "static"}
+
 
 # ---------------------------------------------------------------------------
 # Permission decorators -- these protect routes on the SERVER side.
@@ -176,6 +189,8 @@ def login():
         user.last_login_at = utc_now()
         log_activity(user.id, "Logged in", category="login")
         db.session.commit()
+        if user.must_change_password:
+            return redirect(url_for("auth.change_password"))
         return redirect(home_for(user))
 
     return render_template("login.html", username="")
@@ -193,3 +208,48 @@ def logout():
     session.clear()
     flash("You have been logged out.", "success")
     return redirect(url_for("auth.login"))
+
+
+@auth_bp.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    """
+    Choose a new password. Required after logging in with a temporary
+    password (see load_logged_in_user); any user can also use it any time.
+    """
+    first_time = g.user.must_change_password
+    if request.method == "POST":
+        current = request.form.get("current_password", "")
+        new = request.form.get("new_password", "")
+        confirm = request.form.get("confirm_password", "")
+
+        # Asking for the current password means someone who finds an
+        # unattended logged-in screen can't take over the account.
+        if not g.user.check_password(current):
+            error = "Your current password is incorrect."
+        elif new != confirm:
+            error = "The new passwords don't match."
+        elif g.user.check_password(new):
+            error = "Choose a password different from your current one."
+        else:
+            error = password_problem(new, g.user.username)
+        if error:
+            flash(error, "error")
+            return render_template("change_password.html", first_time=first_time), 400
+
+        g.user.set_password(new)  # stored hashed
+        g.user.must_change_password = False
+        # Log out every OTHER session (e.g. on another computer), but keep
+        # this one working by giving it the new version number.
+        g.user.session_version += 1
+        session["session_version"] = g.user.session_version
+        log_activity(
+            g.user.id,
+            "Changed temporary password (first login)" if first_time else "Changed password",
+            category="account", target_user_id=g.user.id,
+        )
+        db.session.commit()
+        flash("Your password was changed.", "success")
+        return redirect(home_for(g.user))
+
+    return render_template("change_password.html", first_time=first_time)
