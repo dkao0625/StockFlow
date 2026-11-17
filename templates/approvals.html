@@ -19,7 +19,7 @@
 
 {# Status tabs. Each keeps the type/employee filters. #}
 <nav class="tabs" aria-label="Request status">
-  {% for value, label in [('all', 'All requests'), ('Pending', 'Pending'), ('Approved', 'Approved'), ('Rejected', 'Rejected')] %}
+  {% for value, label in [('all', 'All requests'), ('Pending', 'Pending'), ('Needs Correction', 'Needs correction'), ('Approved', 'Approved'), ('Rejected', 'Rejected')] %}
     <a href="{{ url_for('inventory.manager_dashboard', status=value, **filter_args) }}"
        class="tab {{ 'active' if filters.status == value }}">
       {{ label }} <span class="tab-count">{{ status_counts.get(value, 0) }}</span>
@@ -85,7 +85,7 @@
       </thead>
       <tbody>
         {% for req in requests %}
-          {% set not_enough = req.status == 'Pending' and not req.is_archive and req.product.quantity + req.signed_quantity < 0 %}
+          {% set not_enough = req.status == 'Pending' and req.has_fixed_change and req.product.quantity + req.signed_quantity < 0 %}
           <tr id="request-{{ req.id }}">
             {% if has_pending %}
               <td class="select-col">
@@ -104,13 +104,14 @@
             <td>{{ request_type(req) }}</td>
             <td class="num">
               {{ signed_qty(req) }}
-              {% if req.status == 'Pending' and not req.is_archive %}
+              {% if req.status == 'Pending' and (req.has_fixed_change or req.is_count) %}
                 <div class="sub nowrap {{ 'text-red' if not_enough }}">{{ req.product.quantity }} in stock</div>
               {% endif %}
             </td>
             <td class="reason">
-              {% if not req.is_archive %}<strong>{{ req.reason }}</strong>{% endif %}
+              {% if req.changes_stock_on_approval and not req.is_count %}<strong>{{ req.reason }}</strong>{% endif %}
               <div>{{ req.notes or '—' }}</div>
+              {% if req.additional_notes %}<div class="sub">{{ req.additional_notes }}</div>{% endif %}
             </td>
             <td>{{ request_badge(req.status) }}</td>
             <td class="reason">

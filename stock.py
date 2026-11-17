@@ -10,8 +10,10 @@ saves everything or nothing.
 from models import (
     REQUEST_ADJUSTMENT,
     REQUEST_ARCHIVE,
+    REQUEST_COUNT,
     REQUEST_RESTOCK,
     STATUS_APPROVED,
+    STATUS_NEEDS_CORRECTION,
     STATUS_PARTIALLY_RECEIVED,
     STATUS_PENDING,
     InventoryRequest,
@@ -49,7 +51,7 @@ def lock_products(product_ids):
     return {product.id: product for product in products}
 
 
-def change_stock(product, amount, actor_id, note, request_id=None):
+def change_stock(product, amount, actor_id, note, request_id=None, log_request_id=None):
     """
     Add (amount > 0) or remove (amount < 0) stock, and record it.
 
@@ -83,14 +85,24 @@ def change_stock(product, amount, actor_id, note, request_id=None):
         product.id,
         category="stock_increase" if amount > 0 else "stock_decrease",
         quantity_change=amount,
+        # Restock deliveries link the log to their request without using the
+        # movement's request_id (that one is unique: one movement per request).
+        request_id=request_id or log_request_id,
     )
     return movement
 
 
+# Requests that aren't finished yet: waiting for a manager, or sent back to
+# the employee for a correction (they can still be resubmitted and approved).
+UNDECIDED_STATUSES = [STATUS_PENDING, STATUS_NEEDS_CORRECTION]
+
+
 def pending_adjustment_count(product_id):
-    """How many stock adjustment requests for this product are still Pending."""
-    return InventoryRequest.query.filter_by(
-        product_id=product_id, status=STATUS_PENDING, request_type=REQUEST_ADJUSTMENT
+    """How many stock-changing requests (adjustments, counts) for this product are still undecided."""
+    return InventoryRequest.query.filter(
+        InventoryRequest.product_id == product_id,
+        InventoryRequest.request_type.in_([REQUEST_ADJUSTMENT, REQUEST_COUNT]),
+        InventoryRequest.status.in_(UNDECIDED_STATUSES),
     ).count()
 
 
@@ -99,7 +111,7 @@ def open_restock_count(product_id):
     return InventoryRequest.query.filter(
         InventoryRequest.product_id == product_id,
         InventoryRequest.request_type == REQUEST_RESTOCK,
-        InventoryRequest.status.in_([STATUS_PENDING, STATUS_APPROVED, STATUS_PARTIALLY_RECEIVED]),
+        InventoryRequest.status.in_(UNDECIDED_STATUSES + [STATUS_APPROVED, STATUS_PARTIALLY_RECEIVED]),
         InventoryRequest.received_quantity < InventoryRequest.quantity,
     ).count()
 

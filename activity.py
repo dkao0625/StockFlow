@@ -19,6 +19,9 @@ from models import ACTIVITY_CATEGORIES, ROLE_EMPLOYEE, ROLE_MANAGER, ActivityLog
 activity_bp = Blueprint("activity", __name__)
 
 PER_PAGE = 50
+# My Activity is about inventory work, so logins and account events are left out.
+NOT_INVENTORY_WORK = ["login", "account"]
+INVENTORY_CATEGORIES = {k: v for k, v in ACTIVITY_CATEGORIES.items() if k not in NOT_INVENTORY_WORK}
 
 
 def parse_day(text):
@@ -55,7 +58,10 @@ def filtered_query(filters, only_user_id=None):
         Product, ActivityLog.product_id == Product.id
     )
     if only_user_id is not None:
-        query = query.filter(ActivityLog.actor_id == only_user_id)
+        query = query.filter(
+            ActivityLog.actor_id == only_user_id,
+            db.or_(ActivityLog.category.is_(None), ActivityLog.category.notin_(NOT_INVENTORY_WORK)),
+        )
     if filters["q"]:
         # Parameterized ILIKE (safe from SQL injection).
         pattern = f"%{filters['q']}%"
@@ -121,22 +127,25 @@ def export_activity():
             entry.product.name if entry.product else "",
             entry.target_user.username if entry.target_user else "",
             entry.quantity_change,
+            entry.request_id,
             entry.action,
         ]
         for entry in entries
     )
     header = ["Timestamp (UTC)", "User", "Role", "Action", "Product SKU", "Product",
-              "Affected account", "Quantity change", "Description"]
+              "Affected account", "Quantity change", "Request ID", "Description"]
     return csv_response("stockflow-activity", header, rows)
 
 
 @activity_bp.route("/my-activity")
 @login_required
 def my_activity():
-    """Your own actions only (the user filter is fixed to you)."""
+    """Your own inventory actions only (the user filter is fixed to you)."""
     filters = read_filters()
     filters["user"] = None
     filters["role"] = ""
+    if filters["category"] not in INVENTORY_CATEGORIES:
+        filters["category"] = ""
     page = filtered_query(filters, only_user_id=g.user.id).paginate(
         page=request.args.get("page", 1, type=int), per_page=PER_PAGE, error_out=False
     )
@@ -146,7 +155,7 @@ def my_activity():
         page=page,
         filters=filters,
         args=url_args(filters),
-        categories=ACTIVITY_CATEGORIES,
+        categories=INVENTORY_CATEGORIES,
         users=[],
         mine=True,
     )

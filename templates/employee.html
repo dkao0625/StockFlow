@@ -1,85 +1,192 @@
 {% extends "base.html" %}
-{% from "_macros.html" import request_badge, stat_cards, date %}
+{% from "_macros.html" import request_badge, request_type, signed_qty, date %}
 {% block title %}My Dashboard{% endblock %}
 {% block content %}
 <header class="page-header">
   <h1>Welcome, {{ g.user.username }}</h1>
-  <p class="muted">Report damaged or missing items and track your requests.
-    See all products on the <a href="{{ url_for('inventory.inventory_list') }}">Inventory</a> page,
-    or check <a href="{{ url_for('alerts.stock_alerts') }}">Stock alerts</a> and
-    <a href="{{ url_for('restock.new_request') }}">request a restock</a>.</p>
+  <p class="muted">Your requests and what needs attention today. Overall stock numbers are on the
+    <a href="{{ url_for('inventory.inventory_list') }}">Inventory</a> page.</p>
 </header>
 
-{{ stat_cards(stats) }}
+{% if my_stats.needs_correction %}
+  <a class="callout callout-orange callout-link" href="{{ url_for('inventory.my_requests', status='needs_correction') }}">
+    <strong>{{ my_stats.needs_correction }} request{{ 's' if my_stats.needs_correction != 1 }} need{{ 's' if my_stats.needs_correction == 1 }} your correction.</strong>
+    A manager left feedback. Open {{ 'it' if my_stats.needs_correction == 1 else 'them' }} to fix and resubmit →
+  </a>
+{% endif %}
+
+{# ---- My numbers (each card opens the matching filtered page) ---- #}
+<section class="stats">
+  <a class="stat-card stat-link stat-yellow" href="{{ url_for('inventory.my_requests', status='pending') }}">
+    <div class="stat-label">My pending requests</div>
+    <div class="stat-value">{{ my_stats.pending }}</div>
+  </a>
+  <a class="stat-card stat-link stat-green" href="{{ url_for('inventory.my_requests', status='approved') }}">
+    <div class="stat-label">My approved requests</div>
+    <div class="stat-value">{{ my_stats.approved }}</div>
+  </a>
+  <a class="stat-card stat-link stat-red"
+     href="{{ url_for('inventory.my_requests', status='needs_correction' if my_stats.needs_correction else 'rejected') }}">
+    <div class="stat-label">Rejected / needs correction</div>
+    <div class="stat-value">{{ my_stats.rejected + my_stats.needs_correction }}</div>
+    <div class="stat-note">{{ my_stats.needs_correction }} to correct · {{ my_stats.rejected }} rejected</div>
+  </a>
+  <a class="stat-card stat-link" href="{{ url_for('alerts.stock_alerts') }}">
+    <div class="stat-label">Low stock alerts</div>
+    <div class="stat-value">{{ my_stats.alerts }}</div>
+  </a>
+</section>
+
+{# ---- Quick actions: links to the existing forms and pages ---- #}
+<section class="panel">
+  <h2>Quick actions</h2>
+  <div class="quick-actions">
+    <a class="quick-action" href="{{ url_for('inventory.employee_dashboard', type='damaged') }}#report">
+      <strong>Report a problem</strong>
+      <span class="sub">Damaged, missing, count, or other</span>
+    </a>
+    <a class="quick-action" href="{{ url_for('restock.new_request') }}">
+      <strong>Request restock</strong>
+      <span class="sub">Ask a manager to order more</span>
+    </a>
+    <a class="quick-action" href="{{ url_for('inventory.employee_dashboard', type='adjust') }}#report">
+      <strong>Request stock adjustment</strong>
+      <span class="sub">Increase or decrease one product</span>
+    </a>
+    <a class="quick-action" href="{{ url_for('inventory.inventory_list') }}">
+      <strong>View inventory</strong>
+      <span class="sub">Search, filter, and edit products</span>
+    </a>
+  </div>
+</section>
 
 <div class="grid-2">
   <section class="panel">
     <h2 id="report">Report a problem</h2>
-    <form method="post" action="{{ url_for('inventory.submit_request') }}" class="form">
+    {#
+      One form for every request type. data-show-for="..." groups are shown
+      only for the matching type (static/app.js); hidden groups are also
+      disabled so they are not sent. The server validates each type anyway.
+    #}
+    <form method="post" action="{{ url_for('inventory.submit_request') }}" class="form" data-report-form data-submit-once>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
+      <label for="request_type">Request type</label>
+      <select id="request_type" name="request_type" required data-report-type>
+        {% for key, label in report_types.items() %}
+          <option value="{{ key }}" {{ 'selected' if key == selected_type }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+
       <label for="product_id">Product</label>
-      <select id="product_id" name="product_id" required>
+      <select id="product_id" name="product_id" required data-report-product>
         <option value="">Select a product…</option>
         {% for product in products %}
-          <option value="{{ product.id }}" {{ 'disabled' if product.quantity == 0 }}
+          <option value="{{ product.id }}" data-quantity="{{ product.quantity }}" data-unit="{{ product.unit|lower }}"
                   {{ 'selected' if product.id == selected_product_id }}>
             {{ product.name }} ({{ product.sku }}) — {{ product.quantity }} in stock
           </option>
         {% endfor %}
       </select>
+      {% if not products %}<p class="hint">There are no active products yet.</p>{% endif %}
+      <p class="hint" data-recorded-quantity hidden></p>
 
-      <div class="row">
-        <div>
-          <label for="reason">Type</label>
-          <select id="reason" name="reason" required>
-            {% for reason in reasons %}
-              <option value="{{ reason }}">{{ reason }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label for="quantity">Quantity</label>
-          <input id="quantity" name="quantity" type="number" min="1" step="1" required>
+      <div data-show-for="adjust">
+        <div class="row">
+          <div>
+            <label for="direction">Adjustment</label>
+            <select id="direction" name="direction" data-adjust-direction>
+              <option value="increase">Increase</option>
+              <option value="decrease">Decrease</option>
+            </select>
+          </div>
+          <div>
+            <label for="adjust_reason">Reason</label>
+            <select id="adjust_reason" name="adjust_reason" data-adjust-reason>
+              {% for reason in increase_reasons %}<option value="{{ reason }}" data-direction="increase">{{ reason }}</option>{% endfor %}
+              {% for reason in decrease_reasons %}<option value="{{ reason }}" data-direction="decrease">{{ reason }}</option>{% endfor %}
+            </select>
+          </div>
         </div>
       </div>
 
-      <label for="notes">Explanation</label>
-      <textarea id="notes" name="notes" rows="3" maxlength="500"
-                placeholder="e.g. Box crushed during unloading in aisle 4" required></textarea>
+      <div data-show-for="damaged missing adjust restock">
+        <label for="quantity" data-quantity-label>Quantity</label>
+        <input id="quantity" name="quantity" type="number" min="1" step="1" required>
+      </div>
 
-      <button type="submit" class="btn btn-primary">Submit report</button>
+      <div data-show-for="count">
+        <label for="counted_quantity">Actual counted quantity</label>
+        <input id="counted_quantity" name="counted_quantity" type="number" min="0" step="1" required>
+        <p class="hint">Enter what is physically on the shelf. If a manager approves, stock is set to this number.</p>
+      </div>
+
+      <label for="notes" data-notes-label>Explanation</label>
+      <textarea id="notes" name="notes" rows="3" maxlength="500" required
+                placeholder="e.g. Box crushed during unloading in aisle 4"></textarea>
+
+      <label for="additional_notes">Additional notes <span class="optional">(optional)</span></label>
+      <textarea id="additional_notes" name="additional_notes" rows="2" maxlength="500"></textarea>
+
+      <p class="hint">Nothing in inventory changes until a manager approves (restocks: until the delivery is received).</p>
+      <button type="submit" class="btn btn-primary" data-busy-text="Submitting…">Submit request</button>
     </form>
   </section>
 
+  {# ---- My five most recent requests ---- #}
   <section class="panel">
-    <h2>My requests</h2>
+    <div class="panel-header">
+      <h2>Recent requests</h2>
+      <a class="btn btn-link" href="{{ url_for('inventory.my_requests') }}">View all requests →</a>
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr>
-            <th>#</th>
-            <th>Product</th>
-            <th>Request</th>
-            <th>Status</th>
-            <th>Manager note</th>
-          </tr>
+          <tr><th>Product</th><th>Type</th><th class="num">Qty</th><th>Status</th><th>Manager feedback</th><th></th></tr>
         </thead>
         <tbody>
-          {% for req in my_requests %}
+          {% for req in recent_requests %}
             <tr>
-              <td class="mono"><a href="{{ url_for('inventory.request_detail', request_id=req.id) }}">{{ req.id }}</a></td>
-              <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a><div class="sub">{{ date(req.created_at) }}</div></td>
-              <td>{{ req.summary }}</td>
+              <td>
+                {{ req.product.name }}
+                <div class="sub nowrap">{{ date(req.created_at) }}</div>
+              </td>
+              <td>{{ request_type(req) }}<div class="sub">{{ req.summary }}</div></td>
+              <td class="num">{{ signed_qty(req) }}</td>
               <td>{{ request_badge(req.status) }}</td>
-              <td>{{ req.manager_note or '—' }}</td>
+              <td class="reason">{{ req.manager_note or '—' }}</td>
+              <td><a class="btn btn-secondary btn-small" href="{{ url_for('inventory.request_detail', request_id=req.id) }}">View details</a></td>
             </tr>
           {% else %}
-            <tr><td colspan="5" class="empty">You haven't submitted any reports yet.</td></tr>
+            <tr><td colspan="6" class="empty">You haven't submitted any requests yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
 </div>
+
+{# ---- My five most recent inventory actions (from the Activity log) ---- #}
+<section class="panel section-gap">
+  <div class="panel-header">
+    <h2>Recent activity</h2>
+    <a class="btn btn-link" href="{{ url_for('activity.my_activity') }}">View my activity →</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When (UTC)</th><th>Action</th><th>Description</th></tr></thead>
+      <tbody>
+        {% for entry in recent_activity %}
+          <tr>
+            <td class="nowrap sub">{{ date(entry.created_at) }}</td>
+            <td class="nowrap">{{ entry.category_label }}</td>
+            <td class="reason">{{ entry.action }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="empty">No inventory activity yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

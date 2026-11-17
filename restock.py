@@ -23,7 +23,10 @@ from models import (
     DIRECTION_INCREASE,
     REQUEST_RESTOCK,
     RESTOCK_REASON,
+    EVENT_CLOSED,
+    EVENT_RECEIVED,
     STATUS_APPROVED,
+    STATUS_NEEDS_CORRECTION,
     STATUS_PARTIALLY_RECEIVED,
     STATUS_PENDING,
     STATUS_RECEIVED,
@@ -32,6 +35,7 @@ from models import (
     StockReceipt,
     db,
     log_activity,
+    record_event,
 )
 from products import safe_next_url
 from stock import StockError, change_stock, lock_products
@@ -63,7 +67,7 @@ def on_order_by_product():
         )
         .filter(
             InventoryRequest.request_type == REQUEST_RESTOCK,
-            InventoryRequest.status.in_([STATUS_PENDING] + OPEN_STATUSES),
+            InventoryRequest.status.in_([STATUS_PENDING, STATUS_NEEDS_CORRECTION] + OPEN_STATUSES),
         )
         .group_by(InventoryRequest.product_id)
         .all()
@@ -74,6 +78,36 @@ def on_order_by_product():
 # ---------------------------------------------------------------------------
 # 1. Create a restock request (employees and managers)
 # ---------------------------------------------------------------------------
+
+def create_restock(product, quantity, notes, additional_notes=None):
+    """
+    Add a restock request for the logged-in user to the current transaction
+    (caller validates the input and commits). Also used by the employee
+    dashboard's "Report a problem" form, so there's only one way to make one.
+    """
+    new_restock = InventoryRequest(
+        product_id=product.id,
+        employee_id=g.user.id,
+        request_type=REQUEST_RESTOCK,
+        direction=DIRECTION_INCREASE,
+        quantity=quantity,
+        reason=RESTOCK_REASON,
+        notes=notes,
+        additional_notes=additional_notes,
+        status=STATUS_PENDING,
+    )
+    if g.user.is_manager:
+        # A manager's own restock is authorized when they create it.
+        new_restock.status = STATUS_APPROVED
+        new_restock.manager_id = g.user.id
+        new_restock.manager_note = "Created and authorized by manager"
+    db.session.add(new_restock)
+    db.session.flush()  # assigns new_restock.id for the log message
+    verb = "Created and authorized" if g.user.is_manager else "Submitted"
+    log_activity(g.user.id, f"{verb} restock request #{new_restock.id}: {quantity} x {product.sku}", product.id,
+                 category="request_submitted", request_id=new_restock.id)
+    return new_restock
+
 
 @restock_bp.route("/new", methods=["GET", "POST"])
 @login_required
@@ -107,26 +141,7 @@ def new_request():
         return render_template("restock_form.html", products=products, form=form,
                                selected=selected, on_order=on_order_by_product(), errors=errors), 400
 
-    new_restock = InventoryRequest(
-        product_id=selected.id,
-        employee_id=g.user.id,
-        request_type=REQUEST_RESTOCK,
-        direction=DIRECTION_INCREASE,
-        quantity=quantity,
-        reason=RESTOCK_REASON,
-        notes=form["notes"],
-        status=STATUS_PENDING,
-    )
-    if g.user.is_manager:
-        # A manager's own restock is authorized when they create it.
-        new_restock.status = STATUS_APPROVED
-        new_restock.manager_id = g.user.id
-        new_restock.manager_note = "Created and authorized by manager"
-    db.session.add(new_restock)
-    db.session.flush()  # assigns new_restock.id for the log message
-    verb = "Created and authorized" if g.user.is_manager else "Submitted"
-    log_activity(g.user.id, f"{verb} restock request #{new_restock.id}: {quantity} x {selected.sku}", selected.id,
-                 category="request_submitted")
+    new_restock = create_restock(selected, quantity, form["notes"])
     db.session.commit()
 
     if g.user.is_manager:
@@ -204,6 +219,7 @@ def receive(request_id):
         movement = change_stock(
             product, quantity, g.user.id,
             note=f"Received restock (request #{restock.id})" + (f": {note}" if note else ""),
+            log_request_id=restock.id,
         )
         db.session.flush()  # gives the movement an id for the receipt
         db.session.add(StockReceipt(
@@ -215,6 +231,7 @@ def receive(request_id):
         ))
         restock.received_quantity += quantity
         restock.status = STATUS_RECEIVED if restock.remaining_quantity == 0 else STATUS_PARTIALLY_RECEIVED
+        record_event(restock, g.user.id, EVENT_RECEIVED, note=note or None, quantity_after=quantity)
         log_activity(
             g.user.id,
             f"Received {quantity} for restock #{restock.id} ({restock.received_quantity} of "
@@ -222,6 +239,7 @@ def receive(request_id):
             product.id,
             category="stock_received",
             # (the +quantity itself is on the "Stock +N" entry change_stock wrote)
+            request_id=restock.id,
         )
         db.session.commit()
     except StockError as problem:
@@ -265,8 +283,9 @@ def close(request_id):
         summary = f"Closed with {restock.received_quantity} of {restock.quantity} received: {reason}"
         restock.status = STATUS_RECEIVED
         restock.manager_note = summary[:MAX_NOTE_LENGTH]
+        record_event(restock, g.user.id, EVENT_CLOSED, note=reason)
         log_activity(g.user.id, f"Closed restock #{restock.id}. {summary}", restock.product_id,
-                     category="stock_received")
+                     category="stock_received", request_id=restock.id)
         db.session.commit()
     except Exception:
         db.session.rollback()

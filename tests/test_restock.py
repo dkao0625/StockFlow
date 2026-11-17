@@ -256,4 +256,4 @@ def test_on_order_shown_on_stock_alerts(app, client):
     table = page.split("<tbody>")[1]
     gadget_row = table.split("Gadget")[1].split("</tr>")[0]
     assert '<td class="num">7</td>' in gadget_row  # 10 ordered - 3 received
-    assert "Create restock request" in gadget_row
+    assert "Request restock" in gadget_row

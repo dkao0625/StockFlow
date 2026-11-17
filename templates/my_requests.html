@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "_macros.html" import request_badge, request_type, signed_qty, pager, date %}
+{% block title %}My Requests{% endblock %}
+
+{% block content %}
+{% set keep = {'type': filters.type or None, 'q': filters.q or None} %}
+<header class="page-header">
+  <h1>My requests</h1>
+  <p class="muted">Every request you have submitted. Only you and managers can see these.</p>
+</header>
+
+<nav class="tabs" aria-label="Request status">
+  {% for key, label in [('all', 'All'), ('pending', 'Pending'), ('needs_correction', 'Needs correction'), ('approved', 'Approved'), ('rejected', 'Rejected')] %}
+    <a href="{{ url_for('inventory.my_requests', status=key, **keep) }}" class="tab {{ 'active' if filters.status == key }}">
+      {{ label }} <span class="tab-count {{ 'tab-count-alert' if key == 'needs_correction' and counts[key] }}">{{ counts[key] }}</span>
+    </a>
+  {% endfor %}
+</nav>
+
+<form method="get" class="filter-bar" role="search">
+  <input type="hidden" name="status" value="{{ filters.status }}">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search product, SKU, explanation, or request #"
+         aria-label="Search my requests">
+  <select name="type" aria-label="Request type">
+    <option value="">All request types</option>
+    {% for key, label in type_labels.items() %}
+      <option value="{{ key }}" {{ 'selected' if filters.type == key }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-secondary">Filter</button>
+  {% if filters.q or filters.type %}
+    <a class="btn btn-link" href="{{ url_for('inventory.my_requests', status=filters.status) }}">Clear</a>
+  {% endif %}
+</form>
+
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product</th>
+          <th>Type</th>
+          <th class="num">Qty</th>
+          <th>Submitted</th>
+          <th>Last updated</th>
+          <th>Status</th>
+          <th>Manager notes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in requests %}
+          <tr class="{{ 'row-attention' if req.needs_correction }}">
+            <td class="mono">{{ req.id }}</td>
+            <td>
+              <a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a>
+              <div class="sub mono">{{ req.product.sku }}</div>
+            </td>
+            <td>{{ request_type(req) }}<div class="sub">{{ req.summary }}</div></td>
+            <td class="num">{{ signed_qty(req) }}</td>
+            <td class="nowrap">{{ date(req.created_at) }}</td>
+            <td class="nowrap">{{ date(req.updated_at) }}</td>
+            <td>{{ request_badge(req.status) }}</td>
+            <td class="reason">{{ req.manager_note or '—' }}</td>
+            <td>
+              {% if req.needs_correction %}
+                <a class="btn btn-primary btn-small" href="{{ url_for('inventory.request_detail', request_id=req.id) }}">Fix &amp; resubmit</a>
+              {% else %}
+                <a class="btn btn-secondary btn-small" href="{{ url_for('inventory.request_detail', request_id=req.id) }}">View details</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="empty">No requests match.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ pager(page, 'inventory.my_requests', args) }}
+</section>
+{% endblock %}

@@ -6,7 +6,7 @@
 {%- endmacro %}
 
 {% macro request_badge(status) -%}
-  {%- set css = {'Pending': 'yellow', 'Approved': 'green', 'Rejected': 'red', 'Partially Received': 'blue', 'Received': 'green'}[status] -%}
+  {%- set css = {'Pending': 'yellow', 'Approved': 'green', 'Rejected': 'red', 'Partially Received': 'blue', 'Received': 'green', 'Needs Correction': 'orange'}[status] -%}
   <span class="badge badge-{{ css }}">{{ status }}</span>
 {%- endmacro %}
 
@@ -65,7 +65,9 @@
 {%- endmacro %}
 
 {% macro signed_qty(req) -%}
-  {% if req.is_archive %}—{% else %}
+  {% if req.is_count %}
+    <span class="nowrap">counted <strong>{{ req.counted_quantity }}</strong></span>
+  {% elif req.signed_quantity is none %}—{% else %}
     <strong class="{{ 'text-green' if req.signed_quantity > 0 else 'text-red' }}">{{ '%+d'|format(req.signed_quantity) }}</strong>
   {% endif %}
 {%- endmacro %}
@@ -90,7 +92,7 @@
   <form method="post" class="decision-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="next" value="{{ next_url }}">
-    <input name="manager_note" maxlength="500" placeholder="Note (required to reject)"
+    <input name="manager_note" maxlength="500" placeholder="Note (required to reject or ask for a correction)"
            aria-label="Manager note for request {{ req.id }}">
     <div class="decision-buttons">
       <button type="submit" class="btn btn-green"
@@ -98,6 +100,9 @@
       <button type="submit" class="btn btn-red"
               formaction="{{ url_for('inventory.reject_request', request_id=req.id) }}">Reject</button>
     </div>
+    <button type="submit" class="btn btn-secondary btn-small"
+            formaction="{{ url_for('inventory.request_correction', request_id=req.id) }}"
+            title="Send it back to the employee with your note">Request correction</button>
   </form>
 {%- endmacro %}
 

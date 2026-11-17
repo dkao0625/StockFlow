@@ -289,7 +289,7 @@ def adjust():
                 db.session.add(new_request)
                 db.session.flush()
                 log_activity(g.user.id, f"Requested stock change #{new_request.id}: {new_request.summary} for {product.sku}",
-                             product.id, category="request_submitted")
+                             product.id, category="request_submitted", request_id=new_request.id)
         db.session.commit()
     except StockError as problem:
         db.session.rollback()
@@ -378,7 +378,7 @@ def archive():
                 db.session.add(new_request)
                 db.session.flush()
                 log_activity(g.user.id, f"Requested deletion #{new_request.id} of {product.sku}", product.id,
-                             category="request_submitted")
+                             category="request_submitted", request_id=new_request.id)
         db.session.commit()
     except StockError as problem:
         db.session.rollback()

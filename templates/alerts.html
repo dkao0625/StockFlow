@@ -89,7 +89,7 @@
             <td>{{ stock_badge(product.stock_status) }}</td>
             <td class="actions-col">
               <a class="btn btn-secondary btn-small" href="{{ url_for('products.detail', product_id=product.id) }}">View product</a>
-              <a class="btn btn-primary btn-small" href="{{ url_for('restock.new_request', product_id=product.id) }}">Create restock request</a>
+              <a class="btn btn-primary btn-small" href="{{ url_for('restock.new_request', product_id=product.id) }}">Request restock</a>
               {% if g.user.is_manager %}
                 <details class="levels-editor">
                   <summary class="btn btn-link btn-small">Set levels</summary>

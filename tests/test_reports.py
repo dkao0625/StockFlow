@@ -184,7 +184,8 @@ def test_requests_export_respects_status_filter(app, client):
         first = InventoryRequest.query.order_by(InventoryRequest.id).first().id
     client.post(f"/requests/{first}/approve")
     pending = read_csv(client.get("/approvals/export.csv"))  # default: Pending
-    assert [r[9] for r in pending[1:]] == ["second-one"]
+    column = pending[0].index("Explanation")
+    assert [r[column] for r in pending[1:]] == ["second-one"]
     everything = read_csv(client.get("/approvals/export.csv?status=all"))
     assert len(everything) == 3
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import date, pager %}
+{% from "_macros.html" import date, pager, request_badge %}
 {% block title %}{{ 'My activity' if mine else 'Activity' }}{% endblock %}
 
 {% block content %}
@@ -9,7 +9,7 @@
   <div>
     <h1>{{ 'My activity' if mine else 'Activity log' }}</h1>
     <p class="muted">
-      {% if mine %}Everything you have done in {{ site_name }}, newest first.
+      {% if mine %}Your inventory work in {{ site_name }}, newest first (logins aren't listed).
       {% else %}Every recorded action, newest first. Entries can't be edited or deleted.{% endif %}
     </p>
   </div>
@@ -58,6 +58,7 @@
           <th>Action</th>
           <th>Product / account</th>
           <th>Description</th>
+          <th>Related request</th>
           <th class="num">Qty change</th>
         </tr>
       </thead>
@@ -85,6 +86,12 @@
               {% else %}—{% endif %}
             </td>
             <td class="reason">{{ entry.action }}</td>
+            <td class="nowrap">
+              {% if entry.request %}
+                <a href="{{ url_for('inventory.request_detail', request_id=entry.request_id) }}">#{{ entry.request_id }}</a>
+                <div>{{ request_badge(entry.request.status) }}</div>
+              {% else %}—{% endif %}
+            </td>
             <td class="num">
               {% if entry.quantity_change is not none %}
                 <strong class="{{ 'text-green' if entry.quantity_change > 0 else 'text-red' }}">{{ '%+d'|format(entry.quantity_change) }}</strong>
@@ -92,7 +99,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="{{ 5 if mine else 6 }}" class="empty">No activity matches these filters.</td></tr>
+          <tr><td colspan="{{ 6 if mine else 7 }}" class="empty">No activity matches these filters.</td></tr>
         {% endfor %}
       </tbody>
     </table>

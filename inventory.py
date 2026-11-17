@@ -28,10 +28,23 @@ from models import (
     STATUS_REJECTED,
     DIRECTION_INCREASE,
     REQUEST_ARCHIVE,
+    REQUEST_COUNT,
+    REQUEST_ISSUE,
     REQUEST_RESTOCK,
     REQUEST_TYPE_LABELS,
+    COUNT_REASON,
+    DECREASE_REASONS,
+    INCREASE_REASONS,
+    ISSUE_REASON,
     STATUS_PARTIALLY_RECEIVED,
     STATUS_RECEIVED,
+    STATUS_NEEDS_CORRECTION,
+    EVENT_APPROVED,
+    EVENT_CORRECTION_REQUESTED,
+    EVENT_REJECTED,
+    EVENT_RESUBMITTED,
+    record_event,
+    ActivityLog,
     InventoryRequest,
     Product,
     StockMovement,
@@ -41,7 +54,7 @@ from models import (
 )
 from csv_export import MAX_EXPORT_ROWS, csv_response
 from products import safe_next_url
-from stock import StockError, archive_product, change_stock, lock_products
+from stock import MAX_STOCK_QUANTITY, StockError, archive_product, change_stock, lock_products
 
 inventory_bp = Blueprint("inventory", __name__)
 
@@ -142,78 +155,268 @@ def inventory_list():
 # Employee pages
 # ---------------------------------------------------------------------------
 
+# My Requests status filter (?status=...) -> request statuses it includes.
+# "Approved" also covers restocks that are being / have been received.
+MY_REQUEST_FILTERS = {
+    "pending": [STATUS_PENDING],
+    "needs_correction": [STATUS_NEEDS_CORRECTION],
+    "approved": [STATUS_APPROVED, STATUS_PARTIALLY_RECEIVED, STATUS_RECEIVED],
+    "rejected": [STATUS_REJECTED],
+}
+EMPLOYEE_RECENT_LIMIT = 5
+MY_REQUESTS_PER_PAGE = 20
+# Activity categories that aren't inventory work (left off the dashboard).
+NON_INVENTORY_CATEGORIES = ["login", "account"]
+
+
+def my_requests_query():
+    """
+    Only THIS employee's requests. Filtering by employee_id on the server is
+    what keeps other employees' requests private.
+    """
+    return InventoryRequest.query.filter_by(employee_id=g.user.id)
+
+
+def employee_stats():
+    """The employee's own request counts, plus how many products need restocking."""
+    by_status = dict(
+        my_requests_query()
+        .with_entities(InventoryRequest.status, db.func.count())
+        .group_by(InventoryRequest.status)
+        .all()
+    )
+    return {
+        key: sum(by_status.get(status, 0) for status in statuses)
+        for key, statuses in MY_REQUEST_FILTERS.items()
+    } | {
+        # Same rule as the Stock Alerts page: active and at/below reorder level.
+        "alerts": Product.query.filter(
+            Product.is_archived.is_(False), Product.quantity <= Product.reorder_level
+        ).count(),
+    }
+
+
 @inventory_bp.route("/employee")
 @employee_required
 def employee_dashboard():
-    products = active_products()
-    # Only THIS employee's requests -- filtering by employee_id on the
-    # server is what keeps other employees' requests private.
-    my_requests = (
-        InventoryRequest.query.filter_by(employee_id=g.user.id)
+    recent_requests = (
+        my_requests_query()
         .order_by(InventoryRequest.created_at.desc(), InventoryRequest.id.desc())
+        .limit(EMPLOYEE_RECENT_LIMIT)
+        .all()
+    )
+    recent_activity = (
+        ActivityLog.query.filter(
+            ActivityLog.actor_id == g.user.id,
+            db.or_(ActivityLog.category.is_(None), ActivityLog.category.notin_(NON_INVENTORY_CATEGORIES)),
+        )
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+        .limit(EMPLOYEE_RECENT_LIMIT)
         .all()
     )
     return render_template(
         "employee.html",
-        products=products,
+        products=active_products(),
         # Pre-select a product when coming from its detail page (?product_id=5)
         selected_product_id=request.args.get("product_id", type=int),
-        my_requests=my_requests,
-        reasons=REQUEST_REASONS,
-        stats=inventory_stats(products),
+        recent_requests=recent_requests,
+        recent_activity=recent_activity,
+        report_types=REPORT_TYPES,
+        selected_type=request.args.get("type") if request.args.get("type") in REPORT_TYPES else "damaged",
+        increase_reasons=INCREASE_REASONS,
+        decrease_reasons=DECREASE_REASONS,
+        my_stats=employee_stats(),
     )
+
+
+@inventory_bp.route("/my-requests")
+@employee_required
+def my_requests():
+    """Every request this employee submitted, with status/type filters and search."""
+    filters = {
+        "status": request.args.get("status", "all"),
+        "type": request.args.get("type", ""),
+        "q": request.args.get("q", "").strip(),
+    }
+    if filters["status"] not in MY_REQUEST_FILTERS:
+        filters["status"] = "all"
+    if filters["type"] not in REQUEST_TYPE_LABELS:
+        filters["type"] = ""
+
+    query = my_requests_query()
+    if filters["type"]:
+        query = query.filter(request_type_condition(filters["type"]))
+    if filters["q"]:
+        # Search product name/SKU and the explanation; "#12" or "12" finds request 12.
+        pattern = f"%{filters['q']}%"
+        conditions = [Product.name.ilike(pattern), Product.sku.ilike(pattern),
+                      InventoryRequest.notes.ilike(pattern)]
+        if filters["q"].lstrip("#").isdigit():
+            conditions.append(InventoryRequest.id == int(filters["q"].lstrip("#")))
+        query = query.join(Product, InventoryRequest.product_id == Product.id).filter(db.or_(*conditions))
+    # Tab counts respect the type filter and search (but not the status tab).
+    counts = dict(
+        query.with_entities(InventoryRequest.status, db.func.count()).group_by(InventoryRequest.status).all()
+    )
+    tab_counts = {key: sum(counts.get(s, 0) for s in statuses) for key, statuses in MY_REQUEST_FILTERS.items()}
+    tab_counts["all"] = sum(counts.values())
+
+    if filters["status"] != "all":
+        query = query.filter(InventoryRequest.status.in_(MY_REQUEST_FILTERS[filters["status"]]))
+    page = query.order_by(InventoryRequest.updated_at.desc(), InventoryRequest.id.desc()).paginate(
+        page=request.args.get("page", 1, type=int), per_page=MY_REQUESTS_PER_PAGE, error_out=False
+    )
+    return render_template(
+        "my_requests.html",
+        requests=page.items,
+        page=page,
+        filters=filters,
+        args={key: value for key, value in filters.items() if value and value != "all"},
+        counts=tab_counts,
+        type_labels=REQUEST_TYPE_LABELS,
+    )
+
+
+# The "Report a problem" form's request types: form value -> label.
+REPORT_TYPES = {
+    "damaged": "Damaged inventory",
+    "missing": "Missing inventory",
+    "count": "Stock count correction",
+    "adjust": "Stock adjustment (increase / decrease)",
+    "restock": "Restock request",
+    "issue": "Other inventory issue",
+}
+
+
+def parse_count(raw_value):
+    """A counted quantity: a whole number from 0 to MAX_STOCK_QUANTITY, or None."""
+    try:
+        counted = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    return counted if 0 <= counted <= MAX_STOCK_QUANTITY else None
+
+
+def read_report_form(form):
+    """
+    Validate the Report a problem form for the chosen type.
+    Returns (values, error). Only the fields that type uses are read; the
+    rest are ignored, so hidden fields can't sneak values in.
+    """
+    report_type = form.get("request_type", "")
+    if not report_type:
+        # Older form (and tests) send only reason=Damaged/Missing.
+        report_type = {"Damaged": "damaged", "Missing": "missing"}.get(form.get("reason", ""), "")
+    if report_type not in REPORT_TYPES:
+        return None, "Please choose a request type."
+
+    product_id = form.get("product_id", type=int)
+    product = db.session.get(Product, product_id) if product_id else None
+    if product is None or product.is_archived:
+        return None, "Please choose a valid product."
+
+    values = {
+        "type": report_type,
+        "product": product,
+        "notes": form.get("notes", "").strip(),
+        "additional_notes": form.get("additional_notes", "").strip() or None,
+    }
+
+    if report_type in ("damaged", "missing", "adjust", "restock"):
+        values["quantity"] = parse_positive_quantity(form.get("quantity"))
+        if values["quantity"] is None:
+            return None, f"Quantity must be a whole number between 1 and {MAX_REQUEST_QUANTITY:,}."
+
+    if report_type in ("damaged", "missing"):
+        values["direction"] = DIRECTION_DECREASE
+        values["reason"] = "Damaged" if report_type == "damaged" else "Missing"
+    elif report_type == "adjust":
+        values["direction"] = form.get("direction", "")
+        values["reason"] = form.get("adjust_reason", "")
+        allowed = {DIRECTION_INCREASE: INCREASE_REASONS, DIRECTION_DECREASE: DECREASE_REASONS}
+        if values["direction"] not in allowed:
+            return None, "Choose Increase or Decrease."
+        if values["reason"] not in allowed[values["direction"]]:
+            return None, f"Choose a reason: {', '.join(allowed[values['direction']])}."
+    elif report_type == "count":
+        values["counted_quantity"] = parse_count(form.get("counted_quantity"))
+        if values["counted_quantity"] is None:
+            return None, f"Counted quantity must be a whole number from 0 to {MAX_STOCK_QUANTITY:,}."
+
+    # Decreases can't ask for more than is on the shelf right now (checked
+    # again with a row lock when a manager approves).
+    if values.get("direction") == DIRECTION_DECREASE and values["quantity"] > product.quantity:
+        return None, f"Only {product.quantity} unit(s) of {product.name} are in stock."
+    if not values["notes"]:
+        return None, "Please add a short explanation."
+    if len(values["notes"]) > MAX_NOTE_LENGTH:
+        return None, f"Explanation must be {MAX_NOTE_LENGTH} characters or fewer."
+    if values["additional_notes"] and len(values["additional_notes"]) > MAX_NOTE_LENGTH:
+        return None, f"Additional notes must be {MAX_NOTE_LENGTH} characters or fewer."
+    return values, None
 
 
 @inventory_bp.route("/requests", methods=["POST"])
 @employee_required
 def submit_request():
-    product_id = request.form.get("product_id", type=int)
-    reason = request.form.get("reason", "")
-    quantity = parse_positive_quantity(request.form.get("quantity"))
-    notes = request.form.get("notes", "").strip()
-
-    product = db.session.get(Product, product_id) if product_id else None
-
-    # Validate everything on the server.
-    error = None
-    if product is None or product.is_archived:
-        error = "Please choose a valid product."
-    elif reason not in REQUEST_REASONS:
-        error = "Please choose Damaged or Missing."
-    elif quantity is None:
-        error = f"Quantity must be a whole number between 1 and {MAX_REQUEST_QUANTITY:,}."
-    elif quantity > product.quantity:
-        error = f"Only {product.quantity} unit(s) of {product.name} are in stock."
-    elif not notes:
-        error = "Please add a short explanation."
-    elif len(notes) > MAX_NOTE_LENGTH:
-        error = f"Explanation must be {MAX_NOTE_LENGTH} characters or fewer."
-
+    """
+    The employee "Report a problem" form. Every type creates a PENDING
+    request; nothing in inventory changes until a manager approves (and,
+    for restocks, until the delivery is received).
+    """
+    values, error = read_report_form(request.form)
     if error:
         flash(error, "error")
+        # Come back to the form with the same product and type selected.
+        return redirect(url_for(
+            "inventory.employee_dashboard",
+            product_id=request.form.get("product_id") or None,
+            type=request.form.get("request_type") or None,
+        ) + "#report")
+
+    product = values["product"]
+    if values["type"] == "restock":
+        from restock import create_restock  # (imported here: restock.py imports this file)
+        new_request = create_restock(product, values["quantity"], values["notes"], values["additional_notes"])
+        db.session.commit()
+        flash(f"Restock request #{new_request.id} submitted. A manager will review it.", "success")
         return redirect(url_for("inventory.employee_dashboard"))
 
     new_request = InventoryRequest(
         product_id=product.id,
         employee_id=g.user.id,
-        request_type=REQUEST_ADJUSTMENT,
-        direction=DIRECTION_DECREASE,  # damaged/missing items leave stock
-        quantity=quantity,
-        reason=reason,
-        notes=notes,
+        notes=values["notes"],
+        additional_notes=values["additional_notes"],
         status=STATUS_PENDING,
     )
+    if values["type"] == "count":
+        new_request.request_type = REQUEST_COUNT
+        new_request.reason = COUNT_REASON
+        new_request.counted_quantity = values["counted_quantity"]
+        description = f"counted {values['counted_quantity']} of {product.sku} (recorded {product.quantity})"
+    elif values["type"] == "issue":
+        new_request.request_type = REQUEST_ISSUE
+        new_request.reason = ISSUE_REASON
+        description = f"other issue with {product.sku}"
+    else:  # damaged, missing, adjust
+        new_request.request_type = REQUEST_ADJUSTMENT
+        new_request.direction = values["direction"]
+        new_request.quantity = values["quantity"]
+        new_request.reason = values["reason"]
+        description = f"{values['reason']} {new_request.signed_quantity:+d} of {product.sku}"
+
     db.session.add(new_request)
     db.session.flush()  # gives new_request an id for the log message
     log_activity(
         g.user.id,
-        f"Submitted request #{new_request.id}: {reason} x{quantity} of {product.sku}",
+        f"Submitted request #{new_request.id}: {description}",
         product.id,
-        category="damage_report",  # Damaged or Missing items
+        category="damage_report" if values["type"] in ("damaged", "missing") else "request_submitted",
+        request_id=new_request.id,
     )
     db.session.commit()
 
-    flash("Report submitted. A manager will review it.", "success")
+    flash(f"{new_request.type_label} submitted as request #{new_request.id}. A manager will review it.", "success")
     return redirect(url_for("inventory.employee_dashboard"))
 
 
@@ -222,7 +425,8 @@ def submit_request():
 # ---------------------------------------------------------------------------
 
 REQUEST_STATUSES = [
-    STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_PARTIALLY_RECEIVED, STATUS_RECEIVED,
+    STATUS_PENDING, STATUS_NEEDS_CORRECTION, STATUS_APPROVED, STATUS_REJECTED,
+    STATUS_PARTIALLY_RECEIVED, STATUS_RECEIVED,
 ]
 APPROVALS_PER_PAGE = 25
 
@@ -233,6 +437,8 @@ def request_type_condition(type_key):
     return {
         "archive": InventoryRequest.request_type == REQUEST_ARCHIVE,
         "restock": InventoryRequest.request_type == REQUEST_RESTOCK,
+        "count": InventoryRequest.request_type == REQUEST_COUNT,
+        "issue": InventoryRequest.request_type == REQUEST_ISSUE,
         "damaged": db.and_(is_adjustment, InventoryRequest.reason == "Damaged"),
         "missing": db.and_(is_adjustment, InventoryRequest.reason == "Missing"),
         "increase": db.and_(is_adjustment, InventoryRequest.direction == DIRECTION_INCREASE),
@@ -372,6 +578,23 @@ def apply_decision(inventory_request, product, approve, manager_note):
             # Approving a restock only AUTHORIZES the order. Stock goes up
             # later, when a manager records the delivery ("Receive stock").
             pass
+        elif inventory_request.is_issue:
+            # A general issue never changes stock; approving marks it resolved.
+            pass
+        elif inventory_request.is_count:
+            # Stock count correction: the difference is calculated NOW, from the
+            # locked current quantity -- not from what the employee saw when
+            # they submitted (other changes may have happened since).
+            difference = inventory_request.counted_quantity - product.quantity
+            if difference:
+                change_stock(
+                    product,
+                    difference,
+                    g.user.id,
+                    note=(f"Count correction (request #{inventory_request.id}): counted "
+                          f"{inventory_request.counted_quantity}, recorded {product.quantity}"),
+                    request_id=inventory_request.id,
+                )
         else:
             # Stock calculation: +quantity for increases, -quantity for decreases.
             change_stock(
@@ -388,11 +611,14 @@ def apply_decision(inventory_request, product, approve, manager_note):
 
     inventory_request.manager_id = g.user.id
     inventory_request.manager_note = manager_note or None
+    record_event(inventory_request, g.user.id, EVENT_APPROVED if approve else EVENT_REJECTED,
+                 note=manager_note or None)
     log_activity(
         g.user.id,
         f"{inventory_request.status} request #{inventory_request.id}: {inventory_request.summary}",
         product.id,
         category="request_approved" if approve else "request_rejected",
+        request_id=inventory_request.id,
     )
 
 
@@ -460,6 +686,8 @@ def decide_requests(request_ids, approve):
             message += " Inventory was not changed."
         elif locked_requests[0].is_restock:
             message += " The restock is authorized; stock goes up when it is received."
+        elif locked_requests[0].is_issue:
+            message += " The issue is marked resolved; inventory was not changed."
         elif not locked_requests[0].is_archive:
             product = locked_requests[0].product
             message += f" {product.name} stock is now {product.quantity}."
@@ -493,6 +721,133 @@ def bulk_decision():
     if decision not in ("approve", "reject"):
         abort(400)
     return decide_requests(request_ids, approve=(decision == "approve"))
+
+
+# ---------------------------------------------------------------------------
+# Correction workflow
+#
+#   Pending --(manager: Request correction + feedback)--> Needs Correction
+#   Needs Correction --(employee: fix + response, Resubmit)--> Pending
+#
+# Then the manager approves or rejects as usual. Every step is saved as a
+# RequestEvent, so the original values and all feedback stay in the history.
+# Approved and Rejected requests are final.
+# ---------------------------------------------------------------------------
+
+@inventory_bp.route("/requests/<int:request_id>/request-correction", methods=["POST"])
+@manager_required
+def request_correction(request_id):
+    feedback = request.form.get("manager_note", "").strip()
+    if not feedback:
+        flash("Write what the employee needs to correct.", "error")
+        return redirect(back_to_review())
+    if len(feedback) > MAX_NOTE_LENGTH:
+        flash(f"Note must be {MAX_NOTE_LENGTH} characters or fewer.", "error")
+        return redirect(back_to_review())
+
+    try:
+        locked = lock_requests([request_id])  # same lock as approvals
+        if not locked:
+            db.session.rollback()
+            abort(404)
+        inventory_request = locked[0]
+        if inventory_request.status != STATUS_PENDING:
+            db.session.rollback()
+            flash(f"Request #{request_id} is {inventory_request.status}, not Pending. Nothing was changed.", "warning")
+            return redirect(back_to_review())
+        if inventory_request.employee_id == g.user.id:
+            db.session.rollback()
+            flash("You can't review your own request.", "error")
+            return redirect(back_to_review())
+
+        inventory_request.status = STATUS_NEEDS_CORRECTION
+        inventory_request.manager_id = g.user.id
+        inventory_request.manager_note = feedback
+        record_event(inventory_request, g.user.id, EVENT_CORRECTION_REQUESTED, note=feedback)
+        log_activity(
+            g.user.id, f"Requested a correction to request #{request_id}: {feedback}",
+            inventory_request.product_id, category="correction_requested", request_id=request_id,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    flash(f"Request #{request_id} was sent back to {inventory_request.employee.username} for a correction.", "success")
+    return redirect(back_to_review())
+
+
+def validate_resubmission(inventory_request, product, form):
+    """Returns (new_quantity, response, error). Checked against the CURRENT database values."""
+    response = form.get("response", "").strip()
+    new_quantity = inventory_request.editable_quantity
+    if product.is_archived:
+        return None, None, f"{product.name} has been archived, so this request can't be resubmitted."
+    if inventory_request.is_count:
+        new_quantity = parse_count(form.get("quantity"))
+        if new_quantity is None:
+            return None, None, f"Counted quantity must be a whole number from 0 to {MAX_STOCK_QUANTITY:,}."
+    elif inventory_request.has_fixed_change:
+        new_quantity = parse_positive_quantity(form.get("quantity"))
+        if new_quantity is None:
+            return None, None, f"Quantity must be a whole number between 1 and {MAX_REQUEST_QUANTITY:,}."
+        if inventory_request.changes_stock_on_approval and inventory_request.direction == DIRECTION_DECREASE \
+                and new_quantity > product.quantity:
+            return None, None, f"Only {product.quantity} unit(s) of {product.name} are in stock."
+    if not response:
+        return None, None, "Explain what you corrected for the manager."
+    if len(response) > MAX_NOTE_LENGTH:
+        return None, None, f"Your response must be {MAX_NOTE_LENGTH} characters or fewer."
+    return new_quantity, response, None
+
+
+@inventory_bp.route("/requests/<int:request_id>/resubmit", methods=["POST"])
+@employee_required
+def resubmit_request(request_id):
+    detail_page = url_for("inventory.request_detail", request_id=request_id)
+    try:
+        locked = lock_requests([request_id])
+        # Someone else's request looks exactly like a missing one.
+        if not locked or locked[0].employee_id != g.user.id:
+            db.session.rollback()
+            abort(404)
+        inventory_request = locked[0]
+        if not inventory_request.needs_correction:
+            db.session.rollback()
+            flash(f"Only requests marked Needs Correction can be resubmitted (this one is {inventory_request.status}).", "warning")
+            return redirect(detail_page)
+
+        product = lock_products([inventory_request.product_id])[inventory_request.product_id]
+        new_quantity, response, error = validate_resubmission(inventory_request, product, request.form)
+        if error:
+            db.session.rollback()
+            flash(error, "error")
+            return redirect(detail_page)
+
+        old_quantity = inventory_request.editable_quantity
+        if inventory_request.is_count:
+            inventory_request.counted_quantity = new_quantity
+        elif inventory_request.has_fixed_change:
+            inventory_request.quantity = new_quantity
+        inventory_request.status = STATUS_PENDING
+        # The manager's feedback is kept in the history; clear it from the
+        # request so the queue doesn't show an old note on a fresh review.
+        inventory_request.manager_id = None
+        inventory_request.manager_note = None
+        record_event(inventory_request, g.user.id, EVENT_RESUBMITTED, note=response,
+                     quantity_before=old_quantity, quantity_after=new_quantity)
+        change = f" (quantity {old_quantity} → {new_quantity})" if old_quantity != new_quantity else ""
+        log_activity(
+            g.user.id, f"Resubmitted request #{request_id}{change}: {response}",
+            inventory_request.product_id, category="request_resubmitted", request_id=request_id,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    flash(f"Request #{request_id} was resubmitted. A manager will review it again.", "success")
+    return redirect(detail_page)
 
 
 # ---------------------------------------------------------------------------
@@ -535,12 +890,13 @@ def export_requests():
 def requests_csv(requests_found, filename):
     """CSV download of inventory requests (shared with the Reports page)."""
     header = ["Request ID", "Submitted (UTC)", "Employee", "Product SKU", "Product", "Type",
-              "Quantity", "Received", "Reason", "Explanation", "Status", "Reviewed by", "Manager notes"]
+              "Quantity", "Counted quantity", "Received", "Reason", "Explanation", "Additional notes",
+              "Status", "Reviewed by", "Manager notes"]
     rows = (
         [
             r.id, r.created_at, r.employee.username, r.product.sku, r.product.name, r.type_label,
-            r.signed_quantity, r.received_quantity if r.is_restock else None,
-            None if r.is_archive else r.reason, r.notes, r.status,
+            r.signed_quantity, r.counted_quantity, r.received_quantity if r.is_restock else None,
+            None if r.is_archive else r.reason, r.notes, r.additional_notes, r.status,
             r.manager.username if r.manager else None, r.manager_note,
         ]
         for r in requests_found

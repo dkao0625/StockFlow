@@ -103,3 +103,61 @@ document.addEventListener("click", function (event) {
     event.preventDefault();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Employee "Report a problem" form: show only the fields the chosen request
+// type needs. Hidden fields are DISABLED too, so the browser doesn't require
+// or send them. (The server checks every type itself; this is just for ease.)
+// ---------------------------------------------------------------------------
+document.querySelectorAll("[data-report-form]").forEach(function (form) {
+  const typeSelect = form.querySelector("[data-report-type]");
+  const productSelect = form.querySelector("[data-report-product]");
+  const recorded = form.querySelector("[data-recorded-quantity]");
+  const direction = form.querySelector("[data-adjust-direction]");
+  const reason = form.querySelector("[data-adjust-reason]");
+  const quantityLabel = form.querySelector("[data-quantity-label]");
+  const notesLabel = form.querySelector("[data-notes-label]");
+
+  function update() {
+    const type = typeSelect.value;
+
+    form.querySelectorAll("[data-show-for]").forEach(function (group) {
+      const show = group.dataset.showFor.split(" ").indexOf(type) !== -1;
+      group.hidden = !show;
+      group.querySelectorAll("input, select, textarea").forEach(function (field) {
+        field.disabled = !show;
+      });
+    });
+
+    quantityLabel.textContent = type === "restock" ? "Quantity to order" : "Quantity";
+    notesLabel.textContent = type === "restock" ? "Reason" : "Explanation";
+
+    // Only offer reasons that match Increase / Decrease.
+    if (direction && reason) {
+      let firstMatch = null;
+      Array.prototype.forEach.call(reason.options, function (option) {
+        const matches = option.dataset.direction === direction.value;
+        option.hidden = !matches;
+        option.disabled = !matches;
+        if (matches && !firstMatch) firstMatch = option;
+      });
+      if (reason.selectedOptions[0] && reason.selectedOptions[0].disabled && firstMatch) {
+        firstMatch.selected = true;
+      }
+    }
+
+    // Show the currently recorded quantity (helps with counts and decreases).
+    const chosen = productSelect.selectedOptions[0];
+    if (chosen && chosen.value) {
+      recorded.hidden = false;
+      recorded.textContent = "Currently recorded: " + chosen.dataset.quantity + " " + chosen.dataset.unit + ".";
+    } else {
+      recorded.hidden = true;
+    }
+  }
+
+  typeSelect.addEventListener("change", update);
+  productSelect.addEventListener("change", update);
+  if (direction) direction.addEventListener("change", update);
+  update();
+});

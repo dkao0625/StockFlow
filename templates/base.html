@@ -24,6 +24,8 @@
       {% else %}
         <a href="{{ url_for('inventory.employee_dashboard') }}"
            class="{{ 'active' if endpoint == 'inventory.employee_dashboard' }}">My Dashboard</a>
+        <a href="{{ url_for('inventory.my_requests') }}"
+           class="{{ 'active' if endpoint in ('inventory.my_requests', 'inventory.request_detail') }}">My Requests</a>
       {% endif %}
       <a href="{{ url_for('inventory.inventory_list') }}"
          class="{{ 'active' if endpoint == 'inventory.inventory_list' or endpoint.startswith('products.') or endpoint.startswith('bulk.') }}">Inventory</a>
