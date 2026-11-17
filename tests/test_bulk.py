@@ -271,7 +271,7 @@ def test_employee_deletion_request_then_manager_approves(app, client, five_produ
         assert db.session.get(Product, ids[0]) is not None
     detail = client.get(f"/products/{ids[0]}")
     assert detail.status_code == 200 and "Archived" in detail.get_data(as_text=True)
-    assert "Gadget 1" in client.get("/manager").get_data(as_text=True)  # in request history
+    assert "Gadget 1" in client.get("/approvals?status=all").get_data(as_text=True)  # in request history
 
 
 def test_manager_archives_directly_with_confirmation(app, client, five_products):

@@ -1,33 +1,102 @@
 {% extends "base.html" %}
-{% from "_macros.html" import date %}
-{% block title %}Activity{% endblock %}
+{% from "_macros.html" import date, pager %}
+{% block title %}{{ 'My activity' if mine else 'Activity' }}{% endblock %}
+
 {% block content %}
-<header class="page-header">
-  <h1>Inventory activity</h1>
-  <p class="muted">The 200 most recent actions: edits, stock changes, requests, approvals, and archiving.</p>
+{% set endpoint = 'activity.my_activity' if mine else 'activity.activity_log' %}
+
+<header class="page-header product-header">
+  <div>
+    <h1>{{ 'My activity' if mine else 'Activity log' }}</h1>
+    <p class="muted">
+      {% if mine %}Everything you have done in {{ site_name }}, newest first.
+      {% else %}Every recorded action, newest first. Entries can't be edited or deleted.{% endif %}
+    </p>
+  </div>
+  {% if not mine %}
+    <div class="header-actions">
+      <a class="btn btn-secondary" href="{{ url_for('activity.export_activity', **args) }}">Export CSV</a>
+    </div>
+  {% endif %}
 </header>
+
+<form method="get" class="filter-bar" role="search">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search description, user, or product"
+         aria-label="Search activity">
+  <select name="category" aria-label="Action type">
+    <option value="">All actions</option>
+    {% for key, label in categories.items() %}
+      <option value="{{ key }}" {{ 'selected' if filters.category == key }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  {% if not mine %}
+    <select name="user" aria-label="User">
+      <option value="">All users</option>
+      {% for user in users %}
+        <option value="{{ user.id }}" {{ 'selected' if filters.user == user.id }}>{{ user.username }}{{ ' (manager)' if user.is_manager }}</option>
+      {% endfor %}
+    </select>
+    <select name="role" aria-label="Role">
+      <option value="">Any role</option>
+      <option value="employee" {{ 'selected' if filters.role == 'employee' }}>Employees</option>
+      <option value="manager" {{ 'selected' if filters.role == 'manager' }}>Managers</option>
+    </select>
+  {% endif %}
+  <label class="date-filter">From <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+  <label class="date-filter">To <input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+  <button type="submit" class="btn btn-secondary">Filter</button>
+  {% if args %}<a class="btn btn-link" href="{{ url_for(endpoint) }}">Clear</a>{% endif %}
+</form>
 
 <section class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>When</th><th>Who</th><th>Product</th><th>What happened</th></tr></thead>
+      <thead>
+        <tr>
+          <th>When (UTC)</th>
+          {% if not mine %}<th>User</th>{% endif %}
+          <th>Action</th>
+          <th>Product / account</th>
+          <th>Description</th>
+          <th class="num">Qty change</th>
+        </tr>
+      </thead>
       <tbody>
         {% for entry in entries %}
           <tr>
             <td class="nowrap">{{ date(entry.created_at) }}</td>
-            <td>{{ entry.actor.username if entry.actor else '—' }}</td>
+            {% if not mine %}
+              <td>
+                {% if entry.actor %}
+                  <a class="product-link" href="{{ url_for('employees.profile', user_id=entry.actor_id) }}">{{ entry.actor.username }}</a>
+                  <div class="sub">{{ (entry.actor_role or entry.actor.role)|capitalize }}</div>
+                {% else %}—{% endif %}
+              </td>
+            {% endif %}
+            <td class="nowrap">{{ entry.category_label }}</td>
             <td>
               {% if entry.product %}
-                <a class="product-link" href="{{ url_for('products.detail', product_id=entry.product_id) }}">{{ entry.product.sku }}</a>
+                <a class="product-link" href="{{ url_for('products.detail', product_id=entry.product_id) }}">{{ entry.product.name }}</a>
+                <div class="sub mono">{{ entry.product.sku }}</div>
+              {% elif entry.target_user %}
+                {% if mine %}{{ entry.target_user.username }}
+                {% else %}<a class="product-link" href="{{ url_for('employees.profile', user_id=entry.target_user_id) }}">{{ entry.target_user.username }}</a>{% endif %}
+                <div class="sub">Account</div>
               {% else %}—{% endif %}
             </td>
             <td class="reason">{{ entry.action }}</td>
+            <td class="num">
+              {% if entry.quantity_change is not none %}
+                <strong class="{{ 'text-green' if entry.quantity_change > 0 else 'text-red' }}">{{ '%+d'|format(entry.quantity_change) }}</strong>
+              {% else %}—{% endif %}
+            </td>
           </tr>
         {% else %}
-          <tr><td colspan="4" class="empty">No activity yet.</td></tr>
+          <tr><td colspan="{{ 5 if mine else 6 }}" class="empty">No activity matches these filters.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  {{ pager(page, endpoint, args) }}
 </section>
 {% endblock %}

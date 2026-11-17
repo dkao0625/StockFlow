@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stock_badge %}
+{% block title %}Request restock{% endblock %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('alerts.stock_alerts') }}">← Stock alerts</a>
+<header class="page-header">
+  <h1>Request restock</h1>
+  <p class="muted">
+    {% if g.user.is_manager %}
+      As a manager, your restock is authorized as soon as you create it. Inventory goes up only when you record the delivery.
+    {% else %}
+      A manager will review your request. Inventory goes up only after the stock actually arrives.
+    {% endif %}
+  </p>
+</header>
+
+<div class="grid-2">
+  <section class="panel">
+    <form method="post" class="form" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="product_id">Product</label>
+      <select id="product_id" name="product_id" required class="{{ 'is-invalid' if errors.product_id }}">
+        <option value="">Select a product…</option>
+        {% for product in products %}
+          <option value="{{ product.id }}" {{ 'selected' if selected and product.id == selected.id }}>
+            {{ product.name }} ({{ product.sku }}) — {{ product.quantity }} in stock
+          </option>
+        {% endfor %}
+      </select>
+      {% if errors.product_id %}<p class="field-error">{{ errors.product_id }}</p>{% endif %}
+
+      <label for="quantity">Quantity to order</label>
+      <input id="quantity" name="quantity" type="number" min="1" required value="{{ form.quantity }}"
+             class="{{ 'is-invalid' if errors.quantity }}">
+      {% if errors.quantity %}<p class="field-error">{{ errors.quantity }}</p>
+      {% elif selected and selected.suggested_reorder_quantity %}
+        <p class="hint">Suggested: {{ selected.suggested_reorder_quantity }} (target {{ selected.target_stock_level }} − {{ selected.quantity }} in stock).</p>
+      {% elif selected %}
+        <p class="hint">No target stock level is set for this product, so enter the quantity you need.</p>
+      {% endif %}
+
+      <label for="notes">Reason</label>
+      <textarea id="notes" name="notes" rows="3" maxlength="500" required
+                placeholder="e.g. Below reorder level, big order next week"
+                class="{{ 'is-invalid' if errors.notes }}">{{ form.notes }}</textarea>
+      {% if errors.notes %}<p class="field-error">{{ errors.notes }}</p>{% endif %}
+
+      <button type="submit" class="btn btn-primary" data-busy-text="Submitting…">
+        {{ 'Create authorized restock' if g.user.is_manager else 'Submit restock request' }}
+      </button>
+    </form>
+  </section>
+
+  {% if selected %}
+    <section class="panel">
+      <h2>{{ selected.name }}</h2>
+      <dl class="details">
+        <dt>SKU</dt><dd class="mono">{{ selected.sku }}</dd>
+        <dt>In stock</dt><dd>{{ selected.quantity }} {{ selected.unit|lower }}</dd>
+        <dt>Reorder level</dt><dd>{{ selected.reorder_level }}</dd>
+        <dt>Target level</dt><dd>{{ selected.target_stock_level if selected.target_stock_level is not none else '—' }}</dd>
+        <dt>Already on order</dt>
+        <dd>{% if on_order.get(selected.id) %}<strong>{{ on_order[selected.id] }}</strong> (pending or not yet received){% else %}None{% endif %}</dd>
+        <dt>Supplier</dt><dd>{{ selected.supplier or '—' }}</dd>
+        <dt>Status</dt><dd>{{ stock_badge(selected.stock_status) }}</dd>
+      </dl>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

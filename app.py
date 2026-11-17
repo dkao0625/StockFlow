@@ -24,6 +24,11 @@ from auth import USERNAME_PATTERN, MIN_PASSWORD_LENGTH, auth_bp
 from inventory import inventory_bp
 from products import products_bp
 from bulk import bulk_bp
+from manager import manager_bp
+from alerts import alerts_bp
+from restock import restock_bp
+from activity import activity_bp
+from employees import employees_bp
 from models import ROLE_MANAGER, Product, User, db, log_activity
 
 # Read variables from a local .env file (if present) into os.environ.
@@ -111,6 +116,11 @@ def create_app(test_config=None):
     app.register_blueprint(inventory_bp)
     app.register_blueprint(products_bp)
     app.register_blueprint(bulk_bp)
+    app.register_blueprint(manager_bp)
+    app.register_blueprint(alerts_bp)
+    app.register_blueprint(restock_bp)
+    app.register_blueprint(activity_bp)
+    app.register_blueprint(employees_bp)
 
     @app.context_processor
     def inject_site_name():
@@ -168,7 +178,8 @@ def register_cli_commands(app):
         manager.set_password(password)
         db.session.add(manager)
         db.session.flush()
-        log_activity(manager.id, f"Manager account '{username}' created via CLI")
+        log_activity(manager.id, f"Manager account '{username}' created via CLI",
+                     category="account", target_user_id=manager.id)
         db.session.commit()
         click.echo(f"Manager '{username}' created.")
 

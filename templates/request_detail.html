@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% from "_macros.html" import request_badge, request_type, signed_qty, decision_form, receive_form, stock_badge, date %}
+{% block title %}Request #{{ req.id }}{% endblock %}
+
+{% block content %}
+{% if g.user.is_manager %}
+  <a class="back-link" href="{{ url_for('inventory.manager_dashboard') }}">← Approvals</a>
+{% else %}
+  <a class="back-link" href="{{ url_for('inventory.employee_dashboard') }}">← My requests</a>
+{% endif %}
+
+<header class="page-header product-header">
+  <div>
+    <h1>Request #{{ req.id }}</h1>
+    <p class="muted">{{ request_badge(req.status) }} {{ req.type_label }} · submitted {{ date(req.created_at) }}</p>
+  </div>
+</header>
+
+<div class="grid-2">
+  <section class="panel">
+    <h2>Request</h2>
+    <dl class="details">
+      <dt>Request ID</dt><dd class="mono">{{ req.id }}</dd>
+      <dt>Employee</dt><dd>{{ req.employee.username }}</dd>
+      <dt>Type</dt><dd>{{ request_type(req) }}</dd>
+      {% if req.is_restock %}
+        <dt>Quantity ordered</dt><dd>{{ req.quantity }} {{ req.product.unit|lower }}</dd>
+        <dt>Received so far</dt><dd>{{ req.received_quantity }}{% if req.can_receive %} ({{ req.remaining_quantity }} still expected){% endif %}</dd>
+      {% elif not req.is_archive %}
+        <dt>Quantity</dt><dd>{{ signed_qty(req) }} {{ req.product.unit|lower }}</dd>
+        <dt>Reason</dt><dd>{{ req.reason }}</dd>
+      {% endif %}
+      <dt>Explanation</dt><dd>{{ req.notes or '—' }}</dd>
+      <dt>Submitted</dt><dd>{{ date(req.created_at) }}</dd>
+      <dt>Status</dt><dd>{{ request_badge(req.status) }}</dd>
+      <dt>Reviewed by</dt><dd>{{ req.manager.username if req.manager else '—' }}</dd>
+      <dt>Manager notes</dt><dd>{{ req.manager_note or '—' }}</dd>
+      {% if movement %}
+        <dt>Stock change</dt>
+        <dd>{{ '%+d'|format(movement.quantity_change) }} recorded {{ date(movement.created_at) }}</dd>
+      {% endif %}
+    </dl>
+  </section>
+
+  <div class="stack">
+    <section class="panel">
+      <h2>Product</h2>
+      <dl class="details">
+        <dt>Product</dt>
+        <dd><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a></dd>
+        <dt>SKU</dt><dd class="mono">{{ req.product.sku }}</dd>
+        <dt>In stock now</dt><dd>{{ req.product.quantity }} {{ req.product.unit|lower }}</dd>
+        <dt>Status</dt>
+        <dd>{% if req.product.is_archived %}<span class="badge badge-red">Archived</span>{% else %}{{ stock_badge(req.product.stock_status) }}{% endif %}</dd>
+        {% if req.status == 'Pending' and req.is_restock %}
+          <dt>After approval</dt>
+          <dd>No change yet: approval authorizes the order. Stock goes up when the delivery is received.</dd>
+        {% elif req.status == 'Pending' and not req.is_archive %}
+          {% set after = req.product.quantity + req.signed_quantity %}
+          <dt>After approval</dt>
+          <dd class="{{ 'text-red' if after < 0 }}">{{ after }}{% if after < 0 %} — not enough stock to approve{% endif %}</dd>
+        {% endif %}
+      </dl>
+    </section>
+
+    {% if g.user.is_manager and req.status == 'Pending' %}
+      <section class="panel">
+        <h2>Decision</h2>
+        {{ decision_form(req, url_for('inventory.request_detail', request_id=req.id)) }}
+      </section>
+    {% endif %}
+
+    {% if g.user.is_manager and req.can_receive %}
+      <section class="panel">
+        <h2>Receive stock</h2>
+        <p class="sub">Record what actually arrived. Up to {{ req.remaining_quantity }} unit(s) are still expected.</p>
+        {{ receive_form(req, url_for('inventory.request_detail', request_id=req.id)) }}
+      </section>
+    {% endif %}
+
+    {% if req.is_restock and receipts %}
+      <section class="panel">
+        <h2>Deliveries</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Received</th><th class="num">Units</th><th>By</th><th>Note</th></tr></thead>
+            <tbody>
+              {% for receipt in receipts %}
+                <tr>
+                  <td class="nowrap">{{ date(receipt.received_at) }}</td>
+                  <td class="num text-green">+{{ receipt.quantity }}</td>
+                  <td>{{ receipt.received_by.username }}</td>
+                  <td>{{ receipt.note or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

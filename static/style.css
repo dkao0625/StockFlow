@@ -348,3 +348,67 @@ tr.row-error td { background: #fff6f5; }
   .bulk-fields { grid-template-columns: 1fr; }
   .filter-bar select { flex: 1 1 140px; }
 }
+
+/* ---------- Manager Overview ---------- */
+
+.stats.stats-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+a.stat-link { color: inherit; text-decoration: none; transition: box-shadow 0.15s, transform 0.15s; }
+a.stat-link:hover { box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); transform: translateY(-1px); }
+a.stat-link:focus-visible { outline: 3px solid rgba(36, 87, 197, 0.35); outline-offset: 2px; }
+.stat-note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.panel-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.panel-header h2 { margin: 0; }
+.count-red { background: var(--red-bg); color: var(--red); }
+.table-footnote { margin: 10px 0 0; }
+.overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.overview-grid > .panel { margin-bottom: 0; }
+
+@media (max-width: 1100px) {
+  .overview-grid { grid-template-columns: 1fr; }
+}
+@media (min-width: 1300px) {
+  .stats.stats-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (max-width: 800px) {
+  .stats.stats-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- Status tabs, pager, Stock Alerts ---------- */
+
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+.tab {
+  color: var(--muted); text-decoration: none; font-weight: 600;
+  padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-count { background: #eef1f6; color: var(--muted); font-size: 12px; padding: 1px 7px; border-radius: 999px; margin-left: 4px; }
+.tab.active .tab-count { background: #e6edfc; color: var(--primary); }
+
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; }
+
+.levels-editor { display: inline-block; text-align: left; }
+.levels-editor summary { list-style: none; display: inline-block; }
+.levels-editor summary::-webkit-details-marker { display: none; }
+.levels-form {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 8px; min-width: 180px;
+  padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: #f8fafc;
+}
+.levels-form label { font-size: 12px; font-weight: 600; display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+.levels-form input { padding: 6px 9px; font-size: 13px; }
+
+/* ---------- Restock ---------- */
+
+.badge-blue { background: #e6edfc; color: var(--primary); }
+.receive-form { display: flex; flex-direction: column; gap: 6px; min-width: 190px; }
+.receive-form label { font-size: 12px; font-weight: 600; display: flex; flex-direction: column; gap: 4px; }
+.receive-form input { padding: 6px 9px; font-size: 13px; }
+.close-order { margin-top: 6px; }
+.close-order summary { cursor: pointer; }
+.close-order .receive-form { margin-top: 6px; }
+.actions-col .btn + .btn { margin-left: 4px; }
+
+/* ---------- Activity filters ---------- */
+
+.date-filter { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.date-filter input { width: auto; }

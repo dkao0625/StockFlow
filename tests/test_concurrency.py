@@ -2,7 +2,7 @@
 Row-locking test: two managers approve at the same moment.
 
 SQLite ignores SELECT ... FOR UPDATE, so this only runs when
-TEST_DATABASE_URL points at a THROWAWAY PostgreSQL database
+DATABASE_URL_TEST points at a THROWAWAY PostgreSQL database
 (for example a separate Neon branch). See README "Running tests".
 """
 
@@ -14,9 +14,11 @@ import pytest
 from conftest import login, product_id, submit
 from models import InventoryRequest, Product, StockMovement
 
+TEST_DB_URL = os.environ.get("DATABASE_URL_TEST") or os.environ.get("TEST_DATABASE_URL") or ""
+
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("TEST_DATABASE_URL", "").startswith("postgres"),
-    reason="needs TEST_DATABASE_URL pointing at PostgreSQL",
+    not TEST_DB_URL.startswith("postgres"),
+    reason="needs DATABASE_URL_TEST pointing at PostgreSQL",
 )
 
 
@@ -28,19 +30,27 @@ def approve_simultaneously(app, request_ids):
         login(manager_client, "boss")
         clients.append(manager_client)
 
-    start_together = threading.Barrier(len(request_ids))
+    # Timeouts so a broken thread makes the test FAIL instead of hanging forever.
+    start_together = threading.Barrier(len(request_ids), timeout=30)
+    errors = []
 
     def approve(manager_client, request_id):
-        start_together.wait()
-        manager_client.post(f"/requests/{request_id}/approve")
+        try:
+            start_together.wait()
+            manager_client.post(f"/requests/{request_id}/approve")
+        except Exception as problem:  # reported below, in the main thread
+            errors.append(problem)
 
     threads = [
-        threading.Thread(target=approve, args=(c, rid)) for c, rid in zip(clients, request_ids)
+        threading.Thread(target=approve, args=(c, rid), daemon=True)
+        for c, rid in zip(clients, request_ids)
     ]
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join()
+        thread.join(timeout=60)
+    assert not any(thread.is_alive() for thread in threads), "an approval never finished"
+    assert not errors, errors
 
 
 def test_same_request_approved_twice_at_once(app, client):

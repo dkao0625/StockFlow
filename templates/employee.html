@@ -5,7 +5,9 @@
 <header class="page-header">
   <h1>Welcome, {{ g.user.username }}</h1>
   <p class="muted">Report damaged or missing items and track your requests.
-    See all products on the <a href="{{ url_for('inventory.inventory_list') }}">Inventory</a> page.</p>
+    See all products on the <a href="{{ url_for('inventory.inventory_list') }}">Inventory</a> page,
+    or check <a href="{{ url_for('alerts.stock_alerts') }}">Stock alerts</a> and
+    <a href="{{ url_for('restock.new_request') }}">request a restock</a>.</p>
 </header>
 
 {{ stat_cards(stats) }}
@@ -66,7 +68,7 @@
         <tbody>
           {% for req in my_requests %}
             <tr>
-              <td class="mono">{{ req.id }}</td>
+              <td class="mono"><a href="{{ url_for('inventory.request_detail', request_id=req.id) }}">{{ req.id }}</a></td>
               <td><a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a><div class="sub">{{ date(req.created_at) }}</div></td>
               <td>{{ req.summary }}</td>
               <td>{{ request_badge(req.status) }}</td>

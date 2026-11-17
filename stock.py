@@ -9,7 +9,10 @@ saves everything or nothing.
 
 from models import (
     REQUEST_ADJUSTMENT,
+    REQUEST_ARCHIVE,
+    REQUEST_RESTOCK,
     STATUS_APPROVED,
+    STATUS_PARTIALLY_RECEIVED,
     STATUS_PENDING,
     InventoryRequest,
     Product,
@@ -51,7 +54,7 @@ def change_stock(product, amount, actor_id, note, request_id=None):
     Add (amount > 0) or remove (amount < 0) stock, and record it.
 
     The product must already be locked by the caller. Raises StockError
-    instead of ever letting quantity go below 0.
+    instead of ever letting quantity go below 0. Returns the StockMovement.
     """
     if product.is_archived:
         raise StockError(f"{product.name} is archived, so its stock can't change.")
@@ -66,24 +69,38 @@ def change_stock(product, amount, actor_id, note, request_id=None):
     # Stock calculation. The In/Low/Out of Stock status is calculated from
     # quantity whenever it's displayed, so it updates automatically.
     product.quantity = new_quantity
-    db.session.add(
-        StockMovement(
-            product_id=product.id,
-            request_id=request_id,
-            quantity_change=amount,
-            actor_id=actor_id,
-            note=note,
-        )
+    movement = StockMovement(
+        product_id=product.id,
+        request_id=request_id,
+        quantity_change=amount,
+        actor_id=actor_id,
+        note=note,
     )
+    db.session.add(movement)
     log_activity(
-        actor_id, f"Stock {amount:+d} for {product.sku} (now {product.quantity}): {note}", product.id
+        actor_id,
+        f"Stock {amount:+d} for {product.sku} (now {product.quantity}): {note}",
+        product.id,
+        category="stock_increase" if amount > 0 else "stock_decrease",
+        quantity_change=amount,
     )
+    return movement
 
 
 def pending_adjustment_count(product_id):
     """How many stock adjustment requests for this product are still Pending."""
     return InventoryRequest.query.filter_by(
         product_id=product_id, status=STATUS_PENDING, request_type=REQUEST_ADJUSTMENT
+    ).count()
+
+
+def open_restock_count(product_id):
+    """Restock requests for this product that are pending or still waiting for delivery."""
+    return InventoryRequest.query.filter(
+        InventoryRequest.product_id == product_id,
+        InventoryRequest.request_type == REQUEST_RESTOCK,
+        InventoryRequest.status.in_([STATUS_PENDING, STATUS_APPROVED, STATUS_PARTIALLY_RECEIVED]),
+        InventoryRequest.received_quantity < InventoryRequest.quantity,
     ).count()
 
 
@@ -96,6 +113,11 @@ def archive_blocker(product):
         # Archiving now would leave those requests pointing at a hidden
         # product, so a manager must approve or reject them first.
         return f"has {pending} pending stock request(s) that must be reviewed first"
+    restocks = open_restock_count(product.id)
+    if restocks:
+        # Stock that is still on its way couldn't be received into an
+        # archived product.
+        return f"has {restocks} open restock request(s) that must be received or rejected first"
     return None
 
 
@@ -116,9 +138,9 @@ def archive_product(product, actor_id, note):
     # Close other employees' pending "please delete this" requests for the
     # same product -- the product is archived now, so they're fulfilled.
     InventoryRequest.query.filter_by(
-        product_id=product.id, status=STATUS_PENDING
-    ).filter(InventoryRequest.request_type != REQUEST_ADJUSTMENT).update(
+        product_id=product.id, status=STATUS_PENDING, request_type=REQUEST_ARCHIVE
+    ).update(
         {"status": STATUS_APPROVED, "manager_id": actor_id, "manager_note": "Product archived"},
         synchronize_session="fetch",
     )
-    log_activity(actor_id, f"Archived product {product.sku} ({note})", product.id)
+    log_activity(actor_id, f"Archived product {product.sku} ({note})", product.id, category="product_archived")

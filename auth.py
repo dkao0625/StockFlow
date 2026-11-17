@@ -47,9 +47,15 @@ def load_logged_in_user():
 
     user = db.session.get(User, user_id)
 
-    # Reject the session if the user no longer exists, or if they logged
-    # out after this session was created (session_version changed).
-    if user is None or session.get("session_version") != user.session_version:
+    # Reject the session if the user no longer exists, if they logged out
+    # after this session was created (session_version changed), or if a
+    # manager deactivated the account -- checked on EVERY request, so a
+    # deactivated user is locked out immediately, even mid-session.
+    if (
+        user is None
+        or session.get("session_version") != user.session_version
+        or not user.is_active
+    ):
         session.clear()
         return
 
@@ -104,7 +110,7 @@ def employee_required(view):
 def home_for(user):
     """The page each role lands on after logging in."""
     if user.role == ROLE_MANAGER:
-        return url_for("inventory.manager_dashboard")
+        return url_for("manager.overview")
     return url_for("inventory.employee_dashboard")
 
 
@@ -144,7 +150,8 @@ def register():
         new_user.set_password(password)
         db.session.add(new_user)
         db.session.flush()  # assigns new_user.id so we can log it
-        log_activity(new_user.id, f"Registered employee account '{username}'")
+        log_activity(new_user.id, f"Registered employee account '{username}'",
+                     category="account", target_user_id=new_user.id)
         db.session.commit()
 
         flash("Account created. Please log in.", "success")
@@ -168,6 +175,11 @@ def login():
         if user is None or not user.check_password(password):
             flash("Invalid username or password.", "error")
             return render_template("login.html", username=username), 401
+        # Only said AFTER the correct password, so it can't be used to find
+        # out which usernames exist.
+        if not user.is_active:
+            flash("This account has been deactivated. Please ask a manager.", "error")
+            return render_template("login.html", username=username), 403
 
         # Start a fresh session (prevents "session fixation" attacks).
         session.clear()
@@ -175,7 +187,7 @@ def login():
         session["session_version"] = user.session_version
         session.permanent = True  # expires after PERMANENT_SESSION_LIFETIME
 
-        log_activity(user.id, "Logged in")
+        log_activity(user.id, "Logged in", category="login")
         db.session.commit()
         return redirect(home_for(user))
 
@@ -188,7 +200,7 @@ def logout():
     # Bumping session_version makes any copy of the old session cookie
     # useless, not just the one in this browser.
     g.user.session_version += 1
-    log_activity(g.user.id, "Logged out")
+    log_activity(g.user.id, "Logged out", category="login")
     db.session.commit()
 
     session.clear()

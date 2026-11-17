@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% from "_macros.html" import request_badge, request_type, date %}
+{% block title %}{{ user.username }}{% endblock %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('employees.employee_list') }}">← Employees</a>
+
+<header class="page-header product-header">
+  <div>
+    <h1>{{ user.username }}</h1>
+    <p class="muted">
+      {{ user.role|capitalize }} ·
+      {% if user.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-red">Deactivated</span>{% endif %}
+    </p>
+  </div>
+  <div class="header-actions">
+    {% if user.id == g.user.id %}
+      <span class="sub">This is your account.</span>
+    {% elif user.is_active %}
+      <form method="post" action="{{ url_for('employees.deactivate', user_id=user.id) }}"
+            onsubmit="return confirm('Deactivate {{ user.username }}? They will be logged out and unable to log in.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-red">Deactivate account</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_for('employees.activate', user_id=user.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-green">Reactivate account</button>
+      </form>
+    {% endif %}
+  </div>
+</header>
+
+<section class="stats">
+  <div class="stat-card">
+    <div class="stat-label">Requests submitted</div>
+    <div class="stat-value">{{ total_requests }}</div>
+  </div>
+  <div class="stat-card stat-yellow">
+    <div class="stat-label">Pending</div>
+    <div class="stat-value">{{ pending_requests }}</div>
+  </div>
+  <div class="stat-card stat-green">
+    <div class="stat-label">Approved / received</div>
+    <div class="stat-value">{{ requests_by_status.get('Approved', 0) + requests_by_status.get('Partially Received', 0) + requests_by_status.get('Received', 0) }}</div>
+  </div>
+  <div class="stat-card stat-red">
+    <div class="stat-label">Rejected</div>
+    <div class="stat-value">{{ requests_by_status.get('Rejected', 0) }}</div>
+  </div>
+</section>
+
+<section class="panel">
+  <dl class="details">
+    <dt>Joined</dt><dd>{{ date(user.created_at) if user.created_at else '—' }}</dd>
+    <dt>Last activity</dt><dd>{{ date(last_activity) if last_activity else '—' }}</dd>
+  </dl>
+</section>
+
+<div class="overview-grid">
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Requests</h2>
+      {% if total_requests %}
+        <a class="btn btn-link" href="{{ url_for('inventory.manager_dashboard', status='all', employee=user.id) }}">All requests →</a>
+      {% endif %}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Product</th><th>Type</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for req in recent_requests %}
+            <tr>
+              <td class="mono"><a href="{{ url_for('inventory.request_detail', request_id=req.id) }}">{{ req.id }}</a></td>
+              <td>{{ req.product.name }}<div class="sub nowrap">{{ date(req.created_at) }}</div></td>
+              <td>{{ request_type(req) }}<div class="sub">{{ req.summary }}</div></td>
+              <td>{{ request_badge(req.status) }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">No requests submitted.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Activity</h2>
+      <a class="btn btn-link" href="{{ url_for('activity.activity_log', user=user.id) }}">All activity →</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Action</th><th>Description</th></tr></thead>
+        <tbody>
+          {% for entry in recent_activity %}
+            <tr>
+              <td class="nowrap sub">{{ date(entry.created_at) }}</td>
+              <td>{{ entry.category_label }}</td>
+              <td class="reason">
+                {{ entry.action }}
+                {% if entry.actor_id != user.id and entry.actor %}<div class="sub">by {{ entry.actor.username }}</div>{% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="empty">No activity yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

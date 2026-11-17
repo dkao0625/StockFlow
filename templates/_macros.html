@@ -6,7 +6,7 @@
 {%- endmacro %}
 
 {% macro request_badge(status) -%}
-  {%- set css = {'Pending': 'yellow', 'Approved': 'green', 'Rejected': 'red'}[status] -%}
+  {%- set css = {'Pending': 'yellow', 'Approved': 'green', 'Rejected': 'red', 'Partially Received': 'blue', 'Received': 'green'}[status] -%}
   <span class="badge badge-{{ css }}">{{ status }}</span>
 {%- endmacro %}
 
@@ -52,5 +52,73 @@
         <li><span class="mono">{{ product.sku }}</span> {{ product.name }}</li>
       {% endfor %}
     </ul>
+  </details>
+{%- endmacro %}
+
+{# Request type, e.g. "Damaged inventory". Deletion requests get a red badge. #}
+{% macro request_type(req) -%}
+  {% if req.is_archive %}
+    <span class="badge badge-red">{{ req.type_label }}</span>
+  {% else %}
+    {{ req.type_label }}
+  {% endif %}
+{%- endmacro %}
+
+{% macro signed_qty(req) -%}
+  {% if req.is_archive %}—{% else %}
+    <strong class="{{ 'text-green' if req.signed_quantity > 0 else 'text-red' }}">{{ '%+d'|format(req.signed_quantity) }}</strong>
+  {% endif %}
+{%- endmacro %}
+
+{# Previous / next page links that keep the current filters. #}
+{% macro pager(page, endpoint, args) -%}
+  {% if page.pages > 1 %}
+    <nav class="pager" aria-label="Pages">
+      {% if page.has_prev %}
+        <a class="btn btn-secondary btn-small" href="{{ url_for(endpoint, page=page.prev_num, **args) }}">← Previous</a>
+      {% endif %}
+      <span class="sub">Page {{ page.page }} of {{ page.pages }} · {{ page.total }} total</span>
+      {% if page.has_next %}
+        <a class="btn btn-secondary btn-small" href="{{ url_for(endpoint, page=page.next_num, **args) }}">Next →</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{%- endmacro %}
+
+{# Approve / Reject buttons with a note box. Rejecting requires the note. #}
+{% macro decision_form(req, next_url) -%}
+  <form method="post" class="decision-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input name="manager_note" maxlength="500" placeholder="Note (required to reject)"
+           aria-label="Manager note for request {{ req.id }}">
+    <div class="decision-buttons">
+      <button type="submit" class="btn btn-green"
+              formaction="{{ url_for('inventory.approve_request', request_id=req.id) }}">Approve</button>
+      <button type="submit" class="btn btn-red"
+              formaction="{{ url_for('inventory.reject_request', request_id=req.id) }}">Reject</button>
+    </div>
+  </form>
+{%- endmacro %}
+
+{# Receive stock (and close order) form for an approved restock request. #}
+{% macro receive_form(req, next_url) -%}
+  <form method="post" action="{{ url_for('restock.receive', request_id=req.id) }}" class="receive-form" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label>Units received
+      <input type="number" name="quantity" min="1" max="{{ req.remaining_quantity }}" value="{{ req.remaining_quantity }}" required>
+    </label>
+    <input name="note" maxlength="255" placeholder="Delivery note (optional)" aria-label="Delivery note for restock {{ req.id }}">
+    <button type="submit" class="btn btn-green btn-small">Receive stock</button>
+  </form>
+  <details class="close-order">
+    <summary class="sub">No more coming? Close order</summary>
+    <form method="post" action="{{ url_for('restock.close', request_id=req.id) }}" class="receive-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input name="note" maxlength="500" required placeholder="Why is it closed? (required)" aria-label="Reason for closing restock {{ req.id }}">
+      <button type="submit" class="btn btn-red btn-small">Close order</button>
+    </form>
   </details>
 {%- endmacro %}

@@ -256,6 +256,8 @@ def new_product():
         g.user.id,
         f"Added product {product.sku} ({product.name}) with {product.quantity} {product.unit.lower()}",
         product.id,
+        category="product_created",
+        quantity_change=product.quantity or None,
     )
 
     try:
@@ -343,7 +345,7 @@ def edit(product_id):
     for field, value in cleaned.items():
         setattr(product, field, value)  # updated_at is set automatically
     if changes:
-        log_activity(g.user.id, f"Edited {product.sku}: {changes}", product.id)
+        log_activity(g.user.id, f"Edited {product.sku}: {changes}", product.id, category="product_edited")
 
     try:
         db.session.commit()

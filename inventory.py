@@ -26,12 +26,21 @@ from models import (
     STATUS_APPROVED,
     STATUS_PENDING,
     STATUS_REJECTED,
-    ActivityLog,
+    DIRECTION_INCREASE,
+    REQUEST_ARCHIVE,
+    REQUEST_RESTOCK,
+    REQUEST_TYPE_LABELS,
+    STATUS_PARTIALLY_RECEIVED,
+    STATUS_RECEIVED,
     InventoryRequest,
     Product,
+    StockMovement,
+    User,
     db,
     log_activity,
 )
+from csv_export import MAX_EXPORT_ROWS, csv_response
+from products import safe_next_url
 from stock import StockError, archive_product, change_stock, lock_products
 
 inventory_bp = Blueprint("inventory", __name__)
@@ -76,23 +85,23 @@ def index():
     if g.user is None:
         return redirect(url_for("auth.login"))
     if g.user.is_manager:
-        return redirect(url_for("inventory.manager_dashboard"))
+        return redirect(url_for("manager.overview"))
     return redirect(url_for("inventory.employee_dashboard"))
 
 
-@inventory_bp.route("/inventory")
-@login_required
-def inventory_list():
-    # Search and filters come from the URL, e.g. /inventory?q=tape&category=Other
-    filters = {
+def inventory_filters():
+    """Search and filters from the URL, e.g. /inventory?q=tape&category=Other"""
+    return {
         "q": request.args.get("q", "").strip(),
         "category": request.args.get("category", ""),
         "status": request.args.get("status", ""),
         "show": request.args.get("show", "active"),  # "active" or "archived"
     }
-    showing_archived = filters["show"] == "archived"
 
-    query = Product.query.filter_by(is_archived=showing_archived)
+
+def filter_products(filters):
+    """Products matching the Inventory page filters (used by the page and its CSV export)."""
+    query = Product.query.filter_by(is_archived=filters["show"] == "archived")
     if filters["q"]:
         # ilike = case-insensitive LIKE. SQLAlchemy sends the search text as a
         # parameter, never pasted into the SQL, so this is injection-safe.
@@ -107,6 +116,15 @@ def inventory_list():
     # Status isn't stored (it's calculated), so it's filtered in Python.
     if filters["status"] in STOCK_STATUSES:
         products = [p for p in products if p.stock_status == filters["status"]]
+    return products
+
+
+@inventory_bp.route("/inventory")
+@login_required
+def inventory_list():
+    filters = inventory_filters()
+    showing_archived = filters["show"] == "archived"
+    products = filter_products(filters)
 
     return render_template(
         "inventory.html",
@@ -191,6 +209,7 @@ def submit_request():
         g.user.id,
         f"Submitted request #{new_request.id}: {reason} x{quantity} of {product.sku}",
         product.id,
+        category="damage_report",  # Damaged or Missing items
     )
     db.session.commit()
 
@@ -202,34 +221,114 @@ def submit_request():
 # Manager pages
 # ---------------------------------------------------------------------------
 
+REQUEST_STATUSES = [
+    STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_PARTIALLY_RECEIVED, STATUS_RECEIVED,
+]
+APPROVALS_PER_PAGE = 25
+
+
+def request_type_condition(type_key):
+    """The SQL filter for one request type (see REQUEST_TYPE_LABELS in models.py)."""
+    is_adjustment = InventoryRequest.request_type == REQUEST_ADJUSTMENT
+    return {
+        "archive": InventoryRequest.request_type == REQUEST_ARCHIVE,
+        "restock": InventoryRequest.request_type == REQUEST_RESTOCK,
+        "damaged": db.and_(is_adjustment, InventoryRequest.reason == "Damaged"),
+        "missing": db.and_(is_adjustment, InventoryRequest.reason == "Missing"),
+        "increase": db.and_(is_adjustment, InventoryRequest.direction == DIRECTION_INCREASE),
+        "decrease": db.and_(
+            is_adjustment,
+            InventoryRequest.direction == DIRECTION_DECREASE,
+            InventoryRequest.reason.notin_(["Damaged", "Missing"]),
+        ),
+    }[type_key]
+
+
+def approval_filters():
+    filters = {
+        "status": request.args.get("status", STATUS_PENDING),  # "all" shows every status
+        "type": request.args.get("type", ""),
+        "employee": request.args.get("employee", type=int),
+    }
+    if filters["status"] not in REQUEST_STATUSES:
+        filters["status"] = "all"
+    return filters
+
+
+def requests_matching(filters):
+    """Requests matching the type and employee filters (status is applied by the caller)."""
+    query = InventoryRequest.query
+    if filters["type"] in REQUEST_TYPE_LABELS:
+        query = query.filter(request_type_condition(filters["type"]))
+    if filters["employee"]:
+        query = query.filter(InventoryRequest.employee_id == filters["employee"])
+    return query
+
+
+# "/manager" was this page's old address; it still works so old links don't break.
 @inventory_bp.route("/manager")
+@inventory_bp.route("/approvals")  # registered first, so url_for() builds /approvals
 @manager_required
 def manager_dashboard():
-    pending_requests = (
-        InventoryRequest.query.filter_by(status=STATUS_PENDING)
-        .order_by(InventoryRequest.created_at, InventoryRequest.id)
+    """Approvals: every employee request, with filters. Pending is shown by default."""
+    filters = approval_filters()
+    query = requests_matching(filters)
+
+    # Counts for the status tabs (respecting the type/employee filters).
+    status_counts = dict(
+        query.with_entities(InventoryRequest.status, db.func.count())
+        .group_by(InventoryRequest.status)
         .all()
     )
-    request_history = (
-        InventoryRequest.query.filter(InventoryRequest.status != STATUS_PENDING)
-        .order_by(InventoryRequest.created_at.desc(), InventoryRequest.id.desc())
-        .limit(50)
+    status_counts["all"] = sum(status_counts.values())
+
+    if filters["status"] != "all":
+        query = query.filter(InventoryRequest.status == filters["status"])
+    if filters["status"] == STATUS_PENDING:
+        # The review queue: oldest first, so nothing waits forever.
+        query = query.order_by(InventoryRequest.created_at, InventoryRequest.id)
+    else:
+        query = query.order_by(InventoryRequest.created_at.desc(), InventoryRequest.id.desc())
+
+    page = query.paginate(
+        page=request.args.get("page", 1, type=int), per_page=APPROVALS_PER_PAGE, error_out=False
+    )
+    employees = (
+        User.query.filter(User.id.in_(db.select(InventoryRequest.employee_id)))
+        .order_by(User.username)
         .all()
     )
     return render_template(
-        "manager.html",
-        pending_requests=pending_requests,
-        request_history=request_history,
-        stats=inventory_stats(active_products()),
+        "approvals.html",
+        requests=page.items,
+        page=page,
+        filters=filters,
+        status_counts=status_counts,
+        statuses=REQUEST_STATUSES,
+        type_labels=REQUEST_TYPE_LABELS,
+        employees=employees,
+        has_pending=any(r.status == STATUS_PENDING for r in page.items),
     )
 
 
-@inventory_bp.route("/activity")
-@manager_required
-def activity():
-    """Inventory activity history: who did what, newest first."""
-    entries = ActivityLog.query.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc()).limit(200).all()
-    return render_template("activity.html", entries=entries)
+@inventory_bp.route("/requests/<int:request_id>")
+@login_required
+def request_detail(request_id):
+    """
+    One request with everything about it. Managers can see any request;
+    employees only their own (others get "not found", so request ids from
+    other employees can't even be confirmed to exist).
+    """
+    inventory_request = db.get_or_404(InventoryRequest, request_id)
+    if not g.user.is_manager and inventory_request.employee_id != g.user.id:
+        abort(404)
+    movement = StockMovement.query.filter_by(request_id=inventory_request.id).first()
+    return render_template(
+        "request_detail.html",
+        req=inventory_request,
+        movement=movement,
+        receipts=inventory_request.receipts,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -259,9 +358,20 @@ def apply_decision(inventory_request, product, approve, manager_note):
     Approve or reject ONE locked, pending request (inside the caller's
     transaction). Raises StockError if approving would break a rule.
     """
+    # Nobody reviews their own request (managers don't normally create
+    # requests, but this keeps the rule true even if that ever changes).
+    if inventory_request.employee_id == g.user.id:
+        raise StockError(f"You can't review your own request #{inventory_request.id}.")
+
     if approve:
+        if product.is_archived:
+            raise StockError(f"{product.name} is archived.")
         if inventory_request.is_archive:
             archive_product(product, g.user.id, f"approved request #{inventory_request.id}")
+        elif inventory_request.is_restock:
+            # Approving a restock only AUTHORIZES the order. Stock goes up
+            # later, when a manager records the delivery ("Receive stock").
+            pass
         else:
             # Stock calculation: +quantity for increases, -quantity for decreases.
             change_stock(
@@ -282,7 +392,13 @@ def apply_decision(inventory_request, product, approve, manager_note):
         g.user.id,
         f"{inventory_request.status} request #{inventory_request.id}: {inventory_request.summary}",
         product.id,
+        category="request_approved" if approve else "request_rejected",
     )
+
+
+def back_to_review():
+    """After a decision, return to the page it was made on (Overview or Requests)."""
+    return safe_next_url(url_for("inventory.manager_dashboard"))
 
 
 def decide_requests(request_ids, approve):
@@ -298,7 +414,7 @@ def decide_requests(request_ids, approve):
         error = "Please add a note explaining why the request is rejected."
     if error:
         flash(error, "error")
-        return redirect(url_for("inventory.manager_dashboard"))
+        return redirect(back_to_review())
 
     # ---- Start of the database transaction --------------------------------
     # Everything until commit() happens as one unit: either ALL changes are
@@ -312,7 +428,7 @@ def decide_requests(request_ids, approve):
         if already_done:
             db.session.rollback()
             flash(f"Request #{already_done[0]} was already processed. Nothing was changed.", "warning")
-            return redirect(url_for("inventory.manager_dashboard"))
+            return redirect(back_to_review())
 
         # Lock every affected product too (request rows first, then product
         # rows -- the same order everywhere, which avoids deadlocks).
@@ -324,11 +440,12 @@ def decide_requests(request_ids, approve):
     except StockError as problem:
         db.session.rollback()
         if len(request_ids) == 1:
-            prefix = f"Cannot approve request #{request_ids[0]}: "
+            prefix = f"Cannot {'approve' if approve else 'reject'} request #{request_ids[0]}: "
         else:
-            prefix = "Nothing was approved. "
-        flash(f"{prefix}{problem} Reject that request or adjust stock first.", "error")
-        return redirect(url_for("inventory.manager_dashboard"))
+            prefix = f"Nothing was {'approved' if approve else 'rejected'}. "
+        hint = " Reject that request or adjust stock first." if approve else ""
+        flash(f"{prefix}{problem}{hint}", "error")
+        return redirect(back_to_review())
     except Exception:
         # Any unexpected error: undo all partial changes, then re-raise so
         # Flask shows an error page and the problem is logged.
@@ -341,13 +458,15 @@ def decide_requests(request_ids, approve):
         message = f"Request #{request_ids[0]} {verb}."
         if not approve:
             message += " Inventory was not changed."
+        elif locked_requests[0].is_restock:
+            message += " The restock is authorized; stock goes up when it is received."
         elif not locked_requests[0].is_archive:
             product = locked_requests[0].product
             message += f" {product.name} stock is now {product.quantity}."
     else:
         message = f"{len(request_ids)} requests {verb}."
     flash(message, "success")
-    return redirect(url_for("inventory.manager_dashboard"))
+    return redirect(back_to_review())
 
 
 @inventory_bp.route("/requests/<int:request_id>/approve", methods=["POST"])
@@ -370,7 +489,60 @@ def bulk_decision():
     decision = request.form.get("decision")
     if not request_ids:
         flash("Select at least one request first.", "warning")
-        return redirect(url_for("inventory.manager_dashboard"))
+        return redirect(back_to_review())
     if decision not in ("approve", "reject"):
         abort(400)
     return decide_requests(request_ids, approve=(decision == "approve"))
+
+
+# ---------------------------------------------------------------------------
+# CSV exports (managers only). Each one uses the same filters as its page.
+# ---------------------------------------------------------------------------
+
+@inventory_bp.route("/inventory/export.csv")
+@manager_required
+def export_inventory():
+    products = filter_products(inventory_filters())
+    header = ["SKU", "Name", "Category", "Unit", "Quantity", "Reorder level", "Target stock level",
+              "Status", "Location", "Supplier", "Unit cost", "Stock value", "Archived",
+              "Created (UTC)", "Last updated (UTC)"]
+    rows = (
+        [
+            p.sku, p.name, p.category, p.unit, p.quantity, p.reorder_level, p.target_stock_level,
+            "Archived" if p.is_archived else p.stock_status, p.location, p.supplier,
+            p.unit_cost, (p.unit_cost * p.quantity) if p.unit_cost is not None else None,
+            p.is_archived, p.created_at, p.updated_at,
+        ]
+        for p in products
+    )
+    return csv_response("stockflow-inventory", header, rows)
+
+
+@inventory_bp.route("/approvals/export.csv")
+@manager_required
+def export_requests():
+    filters = approval_filters()
+    query = requests_matching(filters)
+    if filters["status"] != "all":
+        query = query.filter(InventoryRequest.status == filters["status"])
+    requests_found = (
+        query.order_by(InventoryRequest.created_at.desc(), InventoryRequest.id.desc())
+        .limit(MAX_EXPORT_ROWS).all()
+    )
+    return requests_csv(requests_found, "stockflow-requests")
+
+
+def requests_csv(requests_found, filename):
+    """CSV download of inventory requests (shared with the Reports page)."""
+    header = ["Request ID", "Submitted (UTC)", "Employee", "Product SKU", "Product", "Type",
+              "Quantity", "Received", "Reason", "Explanation", "Status", "Reviewed by", "Manager notes"]
+    rows = (
+        [
+            r.id, r.created_at, r.employee.username, r.product.sku, r.product.name, r.type_label,
+            r.signed_quantity, r.received_quantity if r.is_restock else None,
+            None if r.is_archive else r.reason, r.notes, r.status,
+            r.manager.username if r.manager else None, r.manager_note,
+        ]
+        for r in requests_found
+    )
+    return csv_response(filename, header, rows)

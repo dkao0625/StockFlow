@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% from "_macros.html" import request_badge, request_type, signed_qty, pager, decision_form, date %}
+{% block title %}Approvals{% endblock %}
+
+{% block content %}
+{# This exact page (with filters), so decisions return here. #}
+{% set this_page = request.full_path.rstrip('?') %}
+{% set filter_args = {'type': filters.type or None, 'employee': filters.employee or None} %}
+
+<header class="page-header">
+  <h1>Approvals</h1>
+  <p class="muted">Review stock adjustments, damage reports, and deletion requests from employees.</p>
+</header>
+
+{# Status tabs. Each keeps the type/employee filters. #}
+<nav class="tabs" aria-label="Request status">
+  {% for value, label in [('all', 'All requests'), ('Pending', 'Pending'), ('Approved', 'Approved'), ('Rejected', 'Rejected')] %}
+    <a href="{{ url_for('inventory.manager_dashboard', status=value, **filter_args) }}"
+       class="tab {{ 'active' if filters.status == value }}">
+      {{ label }} <span class="tab-count">{{ status_counts.get(value, 0) }}</span>
+    </a>
+  {% endfor %}
+</nav>
+
+<form method="get" class="filter-bar">
+  <input type="hidden" name="status" value="{{ filters.status }}">
+  <select name="type" aria-label="Request type">
+    <option value="">All request types</option>
+    {% for key, label in type_labels.items() %}
+      <option value="{{ key }}" {{ 'selected' if filters.type == key }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <select name="employee" aria-label="Employee">
+    <option value="">All employees</option>
+    {% for employee in employees %}
+      <option value="{{ employee.id }}" {{ 'selected' if filters.employee == employee.id }}>{{ employee.username }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-secondary">Filter</button>
+  {% if filters.type or filters.employee %}
+    <a class="btn btn-link" href="{{ url_for('inventory.manager_dashboard', status=filters.status) }}">Clear</a>
+  {% endif %}
+</form>
+
+<section class="panel" {% if has_pending %}data-bulk data-bulk-always{% endif %}>
+  {% if has_pending %}
+    {#
+      Bulk review form. Row checkboxes belong to it through form="bulk-review"
+      (HTML forms can't be nested inside the rows' forms). All selected
+      requests are approved or rejected in ONE transaction: all or nothing.
+    #}
+    <form method="post" id="bulk-review" action="{{ url_for('inventory.bulk_decision') }}"
+          class="bulk-toolbar review-toolbar" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ this_page }}">
+      <strong><span data-selected-count>0</span> selected</strong>
+      <span class="toolbar-divider"></span>
+      <input name="manager_note" maxlength="500" placeholder="Note for all selected (required to reject)"
+             aria-label="Note for selected requests">
+      <button type="submit" name="decision" value="approve" class="btn btn-green" data-bulk-action disabled>Approve selected</button>
+      <button type="submit" name="decision" value="reject" class="btn btn-red" data-bulk-action disabled>Reject selected</button>
+    </form>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table class="selectable">
+      <thead>
+        <tr>
+          {% if has_pending %}<th class="select-col"><input type="checkbox" data-select-all aria-label="Select all pending requests"></th>{% endif %}
+          <th>#</th>
+          <th>Employee</th>
+          <th>Product</th>
+          <th>Type</th>
+          <th class="num">Qty</th>
+          <th>Reason</th>
+          <th>Status</th>
+          <th>Manager notes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in requests %}
+          {% set not_enough = req.status == 'Pending' and not req.is_archive and req.product.quantity + req.signed_quantity < 0 %}
+          <tr id="request-{{ req.id }}">
+            {% if has_pending %}
+              <td class="select-col">
+                {% if req.status == 'Pending' %}
+                  <input type="checkbox" name="request_ids" value="{{ req.id }}" form="bulk-review"
+                         data-select-item aria-label="Select request {{ req.id }}">
+                {% endif %}
+              </td>
+            {% endif %}
+            <td class="mono"><a href="{{ url_for('inventory.request_detail', request_id=req.id) }}">{{ req.id }}</a></td>
+            <td>{{ req.employee.username }}<div class="sub nowrap">{{ date(req.created_at) }}</div></td>
+            <td>
+              <a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a>
+              <div class="sub mono">{{ req.product.sku }}{% if req.product.is_archived %} · archived{% endif %}</div>
+            </td>
+            <td>{{ request_type(req) }}</td>
+            <td class="num">
+              {{ signed_qty(req) }}
+              {% if req.status == 'Pending' and not req.is_archive %}
+                <div class="sub nowrap {{ 'text-red' if not_enough }}">{{ req.product.quantity }} in stock</div>
+              {% endif %}
+            </td>
+            <td class="reason">
+              {% if not req.is_archive %}<strong>{{ req.reason }}</strong>{% endif %}
+              <div>{{ req.notes or '—' }}</div>
+            </td>
+            <td>{{ request_badge(req.status) }}</td>
+            <td class="reason">
+              {{ req.manager_note or '—' }}
+              {% if req.manager %}<div class="sub">by {{ req.manager.username }}</div>{% endif %}
+            </td>
+            <td>
+              {% if req.status == 'Pending' %}{{ decision_form(req, this_page) }}{% endif %}
+              <a class="sub" href="{{ url_for('inventory.request_detail', request_id=req.id) }}">View details</a>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="10" class="empty">
+            {% if filters.status == 'Pending' %}No pending requests. 🎉{% else %}No requests match these filters.{% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ pager(page, 'inventory.manager_dashboard', dict(filter_args, status=filters.status)) }}
+</section>
+{% endblock %}

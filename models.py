@@ -9,6 +9,8 @@ strings by hand (which protects against SQL injection).
 from datetime import datetime, timezone
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
@@ -21,12 +23,16 @@ ROLE_MANAGER = "manager"
 STATUS_PENDING = "Pending"
 STATUS_APPROVED = "Approved"
 STATUS_REJECTED = "Rejected"
+# Restock requests only: after approval, stock arrives in one or more deliveries.
+STATUS_PARTIALLY_RECEIVED = "Partially Received"
+STATUS_RECEIVED = "Received"
 
 REQUEST_REASONS = ["Damaged", "Missing"]  # the employee "Report a problem" form
 
 # Inventory requests come in two types, both reviewed in the same manager queue.
 REQUEST_ADJUSTMENT = "adjustment"  # change stock up or down
 REQUEST_ARCHIVE = "archive"        # remove (archive) a product
+REQUEST_RESTOCK = "restock"        # ask to order more; approval does NOT change stock
 DIRECTION_INCREASE = "increase"
 DIRECTION_DECREASE = "decrease"
 
@@ -34,6 +40,18 @@ DIRECTION_DECREASE = "decrease"
 DECREASE_REASONS = ["Damaged", "Missing", "Count correction"]
 INCREASE_REASONS = ["Received", "Found", "Count correction"]
 ARCHIVE_REASON = "Archive"
+RESTOCK_REASON = "Restock"
+
+# Request types as managers see them on the Approvals page. The key is used
+# in the URL filter (?type=damaged); the value is the label shown.
+REQUEST_TYPE_LABELS = {
+    "increase": "Stock increase",
+    "decrease": "Stock decrease",
+    "damaged": "Damaged inventory",
+    "missing": "Missing inventory",
+    "archive": "Product deletion",
+    "restock": "Restock request",
+}
 
 PRODUCT_CATEGORIES = ["Packaging Supplies", "Clothing", "Electronics", "Office Supplies", "Other"]
 UNITS_OF_MEASUREMENT = ["Pieces", "Boxes", "Rolls", "Packs", "Pairs", "Other"]
@@ -66,6 +84,13 @@ class User(db.Model):
     # truly invalidates a session (see auth.py).
     session_version = db.Column(db.Integer, nullable=False, default=0)
 
+    # A deactivated account can't log in, and any session it already has is
+    # rejected on its next request (see auth.load_logged_in_user).
+    is_active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    # When the account was created (empty for accounts made before this
+    # column existed whose creation date couldn't be worked out).
+    created_at = db.Column(db.DateTime(timezone=True), nullable=True, default=utc_now)
+
     def set_password(self, plain_password):
         # Werkzeug salts and hashes the password; we never store plain text.
         self.password_hash = generate_password_hash(plain_password)
@@ -85,6 +110,10 @@ class Product(db.Model):
         # Python code ever tried to save one.
         db.CheckConstraint("quantity >= 0", name="ck_products_quantity_nonnegative"),
         db.CheckConstraint("reorder_level >= 0", name="ck_products_reorder_nonnegative"),
+        db.CheckConstraint(
+            "target_stock_level IS NULL OR target_stock_level >= 0",
+            name="ck_products_target_nonnegative",
+        ),
         db.CheckConstraint("unit_cost >= 0", name="ck_products_unit_cost_nonnegative"),
         db.CheckConstraint(
             "category IN ('Packaging Supplies', 'Clothing', 'Electronics', 'Office Supplies', 'Other')",
@@ -110,6 +139,9 @@ class Product(db.Model):
     quantity = db.Column(db.Integer, nullable=False, default=0)
     reorder_level = db.Column(db.Integer, nullable=False, default=0)
     location = db.Column(db.String(100), nullable=True)  # e.g. "Warehouse A, Aisle 3, Shelf B"
+    # Optional: how many units the manager wants on hand after restocking.
+    # Used to suggest a reorder quantity on the Stock Alerts page.
+    target_stock_level = db.Column(db.Integer, nullable=True)
 
     # --- Purchasing information ---
     supplier = db.Column(db.String(120), nullable=True)
@@ -154,18 +186,35 @@ class Product(db.Model):
             return STOCK_LOW
         return STOCK_IN
 
+    @property
+    def suggested_reorder_quantity(self):
+        """Units needed to reach the target stock level, or None if no target is set."""
+        if self.target_stock_level is None:
+            return None
+        return max(self.target_stock_level - self.quantity, 0)
+
 
 class InventoryRequest(db.Model):
     __tablename__ = "inventory_requests"
     __table_args__ = (
         db.CheckConstraint(
-            "status IN ('Pending', 'Approved', 'Rejected')", name="ck_requests_status"
+            "status IN ('Pending', 'Approved', 'Rejected', 'Partially Received', 'Received')",
+            name="ck_requests_status",
         ),
         db.CheckConstraint(
-            "reason IN ('Damaged', 'Missing', 'Received', 'Found', 'Count correction', 'Archive')",
+            "reason IN ('Damaged', 'Missing', 'Received', 'Found', 'Count correction', 'Archive', 'Restock')",
             name="ck_requests_reason",
         ),
-        db.CheckConstraint("request_type IN ('adjustment', 'archive')", name="ck_requests_type"),
+        db.CheckConstraint(
+            "request_type IN ('adjustment', 'archive', 'restock')", name="ck_requests_type"
+        ),
+        # A restock request needs a positive quantity, and can never be
+        # received more times over than the quantity that was approved.
+        db.CheckConstraint(
+            "request_type <> 'restock' OR (quantity > 0 AND received_quantity <= quantity)",
+            name="ck_requests_restock_fields",
+        ),
+        db.CheckConstraint("received_quantity >= 0", name="ck_requests_received_nonnegative"),
         db.CheckConstraint("direction IN ('increase', 'decrease')", name="ck_requests_direction"),
         # A stock adjustment always needs a positive quantity and a direction.
         # (An archive request has neither.)
@@ -189,6 +238,8 @@ class InventoryRequest(db.Model):
     manager_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     manager_note = db.Column(db.String(500), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now)
+    # Restock requests: how many of the approved units have arrived so far.
+    received_quantity = db.Column(db.Integer, nullable=False, default=0, server_default="0")
 
     product = db.relationship("Product")
     employee = db.relationship("User", foreign_keys=[employee_id])
@@ -197,6 +248,48 @@ class InventoryRequest(db.Model):
     @property
     def is_archive(self):
         return self.request_type == REQUEST_ARCHIVE
+
+    @property
+    def is_restock(self):
+        return self.request_type == REQUEST_RESTOCK
+
+    @property
+    def changes_stock_on_approval(self):
+        """Only stock adjustments change stock when approved (restock waits for delivery)."""
+        return self.request_type == REQUEST_ADJUSTMENT
+
+    @property
+    def remaining_quantity(self):
+        """Restock units approved but not yet received."""
+        if not self.is_restock:
+            return 0
+        return self.quantity - self.received_quantity
+
+    @property
+    def can_receive(self):
+        """True while an approved restock still has units to arrive."""
+        return (
+            self.is_restock
+            and self.status in (STATUS_APPROVED, STATUS_PARTIALLY_RECEIVED)
+            and self.remaining_quantity > 0
+        )
+
+    @property
+    def type_key(self):
+        """Which REQUEST_TYPE_LABELS entry this request belongs to."""
+        if self.is_archive:
+            return "archive"
+        if self.is_restock:
+            return "restock"
+        if self.reason == "Damaged":
+            return "damaged"
+        if self.reason == "Missing":
+            return "missing"
+        return "increase" if self.direction == DIRECTION_INCREASE else "decrease"
+
+    @property
+    def type_label(self):
+        return REQUEST_TYPE_LABELS[self.type_key]
 
     @property
     def signed_quantity(self):
@@ -210,6 +303,8 @@ class InventoryRequest(db.Model):
         """Short text for tables, e.g. "Damaged -3", "Received +10", "Archive product"."""
         if self.is_archive:
             return "Archive product"
+        if self.is_restock:
+            return f"Restock {self.quantity}"
         return f"{self.reason} {self.signed_quantity:+d}"
 
 
@@ -236,24 +331,114 @@ class StockMovement(db.Model):
     actor = db.relationship("User")
 
 
+class StockReceipt(db.Model):
+    """
+    One delivery received against an approved restock request.
+
+    A restock can arrive in several deliveries, so each delivery gets its own
+    row here, linked to the request and to the stock movement it created.
+    """
+
+    __tablename__ = "stock_receipts"
+    __table_args__ = (
+        db.CheckConstraint("quantity > 0", name="ck_receipts_quantity_positive"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(
+        db.Integer, db.ForeignKey("inventory_requests.id"), nullable=False, index=True
+    )
+    # Each receipt created exactly one stock movement.
+    movement_id = db.Column(
+        db.Integer, db.ForeignKey("stock_movements.id"), nullable=False, unique=True
+    )
+    quantity = db.Column(db.Integer, nullable=False)
+    received_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    received_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now)
+    note = db.Column(db.String(255), nullable=True)
+
+    request = db.relationship("InventoryRequest", backref=db.backref("receipts", order_by="StockReceipt.id"))
+    movement = db.relationship("StockMovement")
+    received_by = db.relationship("User")
+
+
+# Activity log categories: key stored in the database -> label shown.
+ACTIVITY_CATEGORIES = {
+    "product_created": "Product created",
+    "product_edited": "Product edited",
+    "bulk_edit": "Bulk edit",
+    "stock_increase": "Stock increase",
+    "stock_decrease": "Stock decrease",
+    "damage_report": "Damage / loss report",
+    "request_submitted": "Request submitted",
+    "request_approved": "Request approved",
+    "request_rejected": "Request rejected",
+    "product_archived": "Product archived",
+    "stock_received": "Stock received",
+    "account": "Account change",
+    "login": "Log in / out",
+}
+
+
 class ActivityLog(db.Model):
-    """Simple audit trail: who did what, and when."""
+    """
+    Audit trail: who did what, and when.
+
+    Rows are only ever ADDED. The app has no page or route that edits or
+    deletes them, and protect_activity_log() below refuses any attempt to
+    change one through SQLAlchemy.
+    Never put passwords, session data, or other secrets in `action`.
+    """
 
     __tablename__ = "activity_logs"
 
     id = db.Column(db.Integer, primary_key=True)
     actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    action = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now)
+    # The actor's role WHEN the action happened (kept even if it changes later).
+    actor_role = db.Column(db.String(20), nullable=True)
+    # One of ACTIVITY_CATEGORIES (empty only for very old rows).
+    category = db.Column(db.String(30), nullable=True, index=True)
+    action = db.Column(db.String(255), nullable=False)  # the description
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now, index=True)
     # Which product the action was about (empty for logins, registrations, ...).
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=True, index=True)
+    # Which user account the action was about (account changes only).
+    target_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    # +5 / -3 for stock changes; empty when no stock moved.
+    quantity_change = db.Column(db.Integer, nullable=True)
 
-    actor = db.relationship("User")
+    actor = db.relationship("User", foreign_keys=[actor_id])
+    target_user = db.relationship("User", foreign_keys=[target_user_id])
     product = db.relationship("Product")
 
+    @property
+    def category_label(self):
+        return ACTIVITY_CATEGORIES.get(self.category, "Other")
 
-def log_activity(actor_id, action, product_id=None):
+
+def log_activity(actor_id, action, product_id=None, category=None,
+                 quantity_change=None, target_user_id=None):
     """Add an activity log row to the current transaction (caller commits)."""
     if len(action) > 255:
         action = action[:252] + "..."  # fit the column
-    db.session.add(ActivityLog(actor_id=actor_id, action=action, product_id=product_id))
+    actor = db.session.get(User, actor_id) if actor_id else None
+    db.session.add(ActivityLog(
+        actor_id=actor_id,
+        actor_role=actor.role if actor else None,
+        category=category,
+        action=action,
+        product_id=product_id,
+        target_user_id=target_user_id,
+        quantity_change=quantity_change,
+    ))
+
+
+@event.listens_for(Session, "before_flush")
+def protect_activity_log(session, flush_context, instances):
+    """Refuse to save changes to, or deletions of, existing activity log rows."""
+    for obj in session.deleted:
+        if isinstance(obj, ActivityLog):
+            raise PermissionError("Activity log entries can't be deleted.")
+    for obj in session.dirty:
+        if isinstance(obj, ActivityLog) and session.is_modified(obj):
+            raise PermissionError("Activity log entries can't be changed.")

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stock_badge, request_type, date %}
+{% block title %}Overview{% endblock %}
+
+{% block content %}
+{% set this_page = url_for('manager.overview') %}
+
+<header class="page-header">
+  <h1>Overview</h1>
+  <p class="muted">Today's inventory at a glance: what needs your attention first.</p>
+</header>
+
+{# ---- Summary cards (clickable cards are links) ---- #}
+<section class="stats stats-6">
+  <a class="stat-card stat-link" href="{{ url_for('inventory.inventory_list') }}">
+    <div class="stat-label">Total products</div>
+    <div class="stat-value">{{ "{:,}".format(stats.total_products) }}</div>
+  </a>
+  <a class="stat-card stat-link" href="{{ url_for('inventory.inventory_list') }}">
+    <div class="stat-label">Units in stock</div>
+    <div class="stat-value">{{ "{:,}".format(stats.total_units) }}</div>
+  </a>
+  <a class="stat-card stat-link {{ 'stat-yellow' if stats.pending_requests }}"
+     href="{{ url_for('inventory.manager_dashboard', status='Pending') }}">
+    <div class="stat-label">Pending requests</div>
+    <div class="stat-value">{{ stats.pending_requests }}</div>
+  </a>
+  <a class="stat-card stat-link stat-yellow"
+     href="{{ url_for('alerts.stock_alerts', status='low') }}">
+    <div class="stat-label">Low stock</div>
+    <div class="stat-value">{{ stats.low_stock }}</div>
+  </a>
+  <a class="stat-card stat-link stat-red"
+     href="{{ url_for('alerts.stock_alerts', status='out') }}">
+    <div class="stat-label">Out of stock</div>
+    <div class="stat-value">{{ stats.out_of_stock }}</div>
+  </a>
+  <div class="stat-card stat-green">
+    <div class="stat-label">Inventory value</div>
+    <div class="stat-value">${{ "{:,.2f}".format(stats.inventory_value) }}</div>
+    {% if stats.missing_cost %}
+      <div class="stat-note" title="Add a unit cost to these products to include them.">
+        Excludes {{ stats.missing_cost }} in-stock product{{ 's' if stats.missing_cost != 1 }} with no unit cost
+      </div>
+    {% else %}
+      <div class="stat-note">Quantity × unit cost</div>
+    {% endif %}
+  </div>
+</section>
+
+{# ---- Pending approvals ---- #}
+<section class="panel">
+  <div class="panel-header">
+    <h2>Pending approvals <span class="count">{{ stats.pending_requests }}</span></h2>
+    <a class="btn btn-link" href="{{ url_for('inventory.manager_dashboard', status='Pending') }}">View all pending →</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Product</th>
+          <th>Request type</th>
+          <th class="num">Quantity</th>
+          <th>Submitted</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in pending_requests %}
+          {% set not_enough = not req.is_archive and req.product.quantity + req.signed_quantity < 0 %}
+          <tr>
+            <td>{{ req.employee.username }}</td>
+            <td>
+              <a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a>
+              <div class="sub mono">{{ req.product.sku }}</div>
+            </td>
+            <td>
+              {{ request_type(req) }}
+              {% if req.changes_stock_on_approval %}<div class="sub">{{ req.reason }}</div>{% endif %}
+            </td>
+            <td class="num">
+              {% if req.is_archive %}—{% else %}
+                <strong class="{{ 'text-green' if req.signed_quantity > 0 else 'text-red' }}">{{ '%+d'|format(req.signed_quantity) }}</strong>
+                <div class="sub {{ 'text-red' if not_enough }}">{{ req.product.quantity }} in stock</div>
+              {% endif %}
+            </td>
+            <td class="nowrap">{{ date(req.created_at) }}</td>
+            <td>
+              <form method="post" class="decision-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="next" value="{{ this_page }}">
+                <input name="manager_note" maxlength="500" placeholder="Note (required to reject)"
+                       aria-label="Manager note for request {{ req.id }}">
+                <div class="decision-buttons">
+                  <button type="submit" class="btn btn-green"
+                          formaction="{{ url_for('inventory.approve_request', request_id=req.id) }}"
+                          {% if not_enough %}title="Not enough stock to approve this decrease"{% endif %}>Approve</button>
+                  <button type="submit" class="btn btn-red"
+                          formaction="{{ url_for('inventory.reject_request', request_id=req.id) }}">Reject</button>
+                </div>
+                <a class="sub" href="{{ url_for('inventory.request_detail', request_id=req.id) }}">View details (request #{{ req.id }})</a>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="empty">No pending requests. 🎉</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if stats.pending_requests > pending_requests|length %}
+    <p class="sub table-footnote">Showing the {{ pending_requests|length }} newest of {{ stats.pending_requests }} pending requests.</p>
+  {% endif %}
+</section>
+
+<div class="overview-grid">
+  {# ---- Stock alerts ---- #}
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Stock alerts <span class="count count-red">{{ alert_total }}</span></h2>
+      <a class="btn btn-link" href="{{ url_for('alerts.stock_alerts') }}">View all alerts →</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Product</th><th class="num">Available</th><th class="num">Reorder level</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for product in alerts %}
+            <tr>
+              <td>
+                <a class="product-link" href="{{ url_for('products.detail', product_id=product.id) }}">{{ product.name }}</a>
+                <div class="sub mono">{{ product.sku }}</div>
+              </td>
+              <td class="num">{{ product.quantity }}</td>
+              <td class="num">{{ product.reorder_level }}</td>
+              <td>{{ stock_badge(product.stock_status) }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">Every product is above its reorder level.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if alert_total > alerts|length %}
+      <p class="sub table-footnote">Showing {{ alerts|length }} of {{ alert_total }} alerts.</p>
+    {% endif %}
+  </section>
+
+  {# ---- Recent activity ---- #}
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Recent activity</h2>
+      <a class="btn btn-link" href="{{ url_for('activity.activity_log') }}">View all activity →</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Who</th><th>Product</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for entry in recent_activity %}
+            <tr>
+              <td class="nowrap sub">{{ date(entry.created_at) }}</td>
+              <td>
+                {{ entry.actor.username if entry.actor else '—' }}
+                {% if entry.actor %}<div class="sub">{{ entry.actor.role|capitalize }}</div>{% endif %}
+              </td>
+              <td>
+                <a class="product-link mono" href="{{ url_for('products.detail', product_id=entry.product_id) }}">{{ entry.product.sku }}</a>
+              </td>
+              <td class="reason">{{ entry.action }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">No inventory activity yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

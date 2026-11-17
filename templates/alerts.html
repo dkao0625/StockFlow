@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stock_badge %}
+{% block title %}Stock Alerts{% endblock %}
+
+{% block content %}
+{% set this_page = request.full_path.rstrip('?') %}
+{% set keep = {'q': filters.q or None, 'sort': filters.sort} %}
+
+<header class="page-header product-header">
+  <div>
+    <h1>Stock alerts</h1>
+    <p class="muted">
+      Products at or below their reorder level.
+      {% if g.user.is_manager %}Set a target stock level to get a suggested reorder quantity.{% endif %}
+    </p>
+  </div>
+  <div class="header-actions">
+    {% if g.user.is_manager %}
+      <a class="btn btn-secondary" href="{{ url_for('restock.orders') }}">Restock orders</a>
+    {% endif %}
+    <a class="btn btn-primary" href="{{ url_for('restock.new_request') }}">+ Request restock</a>
+  </div>
+</header>
+
+<nav class="tabs" aria-label="Alert type">
+  <a href="{{ url_for('alerts.stock_alerts', **keep) }}" class="tab {{ 'active' if not filters.status }}">
+    All alerts <span class="tab-count">{{ counts.all }}</span></a>
+  <a href="{{ url_for('alerts.stock_alerts', status='low', **keep) }}" class="tab {{ 'active' if filters.status == 'low' }}">
+    Low stock <span class="tab-count">{{ counts.low }}</span></a>
+  <a href="{{ url_for('alerts.stock_alerts', status='out', **keep) }}" class="tab {{ 'active' if filters.status == 'out' }}">
+    Out of stock <span class="tab-count">{{ counts.out }}</span></a>
+</nav>
+
+<form method="get" class="filter-bar" role="search">
+  {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search name, SKU, location, or supplier"
+         aria-label="Search alerts">
+  <select name="sort" aria-label="Sort">
+    {% for key, option in sort_options.items() %}
+      <option value="{{ key }}" {{ 'selected' if filters.sort == key }}>{{ option[0] }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-secondary">Apply</button>
+  {% if filters.q %}
+    <a class="btn btn-link" href="{{ url_for('alerts.stock_alerts', status=filters.status or None, sort=filters.sort) }}">Clear</a>
+  {% endif %}
+</form>
+
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Category</th>
+          <th class="num">Available</th>
+          <th class="num">Reorder level</th>
+          <th class="num">Target</th>
+          <th class="num">Suggested reorder</th>
+          <th class="num">On order</th>
+          <th>Location</th>
+          <th>Supplier</th>
+          <th>Status</th>
+          <th class="actions-col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for product in products %}
+          <tr>
+            <td>
+              <a class="product-link" href="{{ url_for('products.detail', product_id=product.id) }}">{{ product.name }}</a>
+              <div class="sub mono">{{ product.sku }}</div>
+            </td>
+            <td>{{ product.category }}</td>
+            <td class="num"><strong>{{ product.quantity }}</strong> <span class="sub">{{ product.unit|lower }}</span></td>
+            <td class="num">{{ product.reorder_level }}</td>
+            <td class="num">{{ product.target_stock_level if product.target_stock_level is not none else '—' }}</td>
+            <td class="num">
+              {% if product.suggested_reorder_quantity is not none %}
+                <strong>{{ product.suggested_reorder_quantity }}</strong>
+              {% else %}
+                <span class="sub" title="No target stock level set">Enter manually</span>
+              {% endif %}
+            </td>
+            <td class="num">{{ on_order.get(product.id, '—') }}</td>
+            <td>{{ product.location or '—' }}</td>
+            <td>{{ product.supplier or '—' }}</td>
+            <td>{{ stock_badge(product.stock_status) }}</td>
+            <td class="actions-col">
+              <a class="btn btn-secondary btn-small" href="{{ url_for('products.detail', product_id=product.id) }}">View product</a>
+              <a class="btn btn-primary btn-small" href="{{ url_for('restock.new_request', product_id=product.id) }}">Create restock request</a>
+              {% if g.user.is_manager %}
+                <details class="levels-editor">
+                  <summary class="btn btn-link btn-small">Set levels</summary>
+                  <form method="post" action="{{ url_for('alerts.update_levels', product_id=product.id) }}" class="levels-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="next" value="{{ this_page }}">
+                    <label>Reorder level
+                      <input type="number" name="reorder_level" min="0" required value="{{ product.reorder_level }}">
+                    </label>
+                    <label>Target stock <span class="optional">(optional)</span>
+                      <input type="number" name="target_stock_level" min="0" value="{{ product.target_stock_level if product.target_stock_level is not none }}">
+                    </label>
+                    <button type="submit" class="btn btn-primary btn-small">Save</button>
+                  </form>
+                </details>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="11" class="empty">
+            {% if filters.q or filters.status %}No alerts match these filters.{% else %}Every product is above its reorder level. 🎉{% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

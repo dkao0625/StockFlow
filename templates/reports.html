@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+
+{% block content %}
+<header class="page-header product-header">
+  <div>
+    <h1>Reports</h1>
+    <p class="muted">Calculated from your records each time this page loads. Dates are in UTC.</p>
+  </div>
+  <div class="header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('inventory.export_inventory') }}">Export inventory CSV</a>
+    <a class="btn btn-secondary" href="{{ url_for('alerts.export_alerts') }}">Export stock alerts CSV</a>
+  </div>
+</header>
+
+{# ===================== Inventory summary (right now) ===================== #}
+<section class="panel">
+  <h2>Inventory summary <span class="sub">as of now</span></h2>
+  <div class="stats stats-5">
+    <div class="stat-card">
+      <div class="stat-label">Active products</div>
+      <div class="stat-value">{{ "{:,}".format(summary.total_products) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Units in stock</div>
+      <div class="stat-value">{{ "{:,}".format(summary.total_units) }}</div>
+    </div>
+    <div class="stat-card stat-yellow">
+      <div class="stat-label">Low stock</div>
+      <div class="stat-value">{{ summary.low_stock }}</div>
+    </div>
+    <div class="stat-card stat-red">
+      <div class="stat-label">Out of stock</div>
+      <div class="stat-value">{{ summary.out_of_stock }}</div>
+    </div>
+    <div class="stat-card stat-green">
+      <div class="stat-label">Inventory value</div>
+      <div class="stat-value">${{ "{:,.2f}".format(summary.inventory_value) }}</div>
+      <div class="stat-note">
+        {% if summary.missing_cost %}Excludes {{ summary.missing_cost }} in-stock product{{ 's' if summary.missing_cost != 1 }} with no unit cost
+        {% else %}Products with a unit cost{% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ===================== Date range ===================== #}
+<form method="get" class="filter-bar">
+  <strong>Date range</strong>
+  <label class="date-filter">From <input type="date" name="date_from" value="{{ first_day.isoformat() }}" required></label>
+  <label class="date-filter">To <input type="date" name="date_to" value="{{ last_day.isoformat() }}" required></label>
+  <button type="submit" class="btn btn-secondary">Update</button>
+  <a class="btn btn-link" href="{{ url_for('reports.reports') }}">Last 30 days</a>
+</form>
+
+{# ===================== Movements ===================== #}
+<section class="panel">
+  <div class="panel-header">
+    <h2>Inventory movements <span class="sub">{{ first_day.strftime('%b %d, %Y') }} – {{ last_day.strftime('%b %d, %Y') }}</span></h2>
+    <a class="btn btn-secondary btn-small" href="{{ url_for('reports.export_movements', **range_args) }}">Export CSV</a>
+  </div>
+
+  <div class="stats stats-5">
+    <div class="stat-card stat-green">
+      <div class="stat-label">Stock added</div>
+      <div class="stat-value text-green">+{{ "{:,}".format(movement_totals.added) }}</div>
+      <div class="stat-note">incl. {{ "{:,}".format(movement_totals.received) }} received from restocks</div>
+    </div>
+    <div class="stat-card stat-red">
+      <div class="stat-label">Stock removed</div>
+      <div class="stat-value text-red">−{{ "{:,}".format(movement_totals.removed) }}</div>
+    </div>
+    <div class="stat-card stat-yellow">
+      <div class="stat-label">Damaged / missing</div>
+      <div class="stat-value">{{ "{:,}".format(movement_totals.damage) }}</div>
+      <div class="stat-note">part of stock removed</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Net change</div>
+      <div class="stat-value">{{ '%+d'|format(movement_totals.net) }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Movements</div>
+      <div class="stat-value">{{ movement_totals.count }}</div>
+    </div>
+  </div>
+
+  {% if movement_days %}
+    <h3 class="subhead">By day</h3>
+    <div class="legend"><span class="swatch swatch-green"></span> Added <span class="swatch swatch-red"></span> Removed</div>
+    <table class="bar-table">
+      <thead><tr><th>Day</th><th>Added / removed</th><th class="num">Added</th><th class="num">Removed</th></tr></thead>
+      <tbody>
+        {% for row in movement_days %}
+          <tr>
+            <td class="nowrap">{{ row.day.strftime('%a %b %d') }}</td>
+            <td class="bar-cell">
+              <div class="bar bar-green" style="width: {{ (row.added / biggest_day * 100)|round(1) }}%"></div>
+              <div class="bar bar-red" style="width: {{ (row.removed / biggest_day * 100)|round(1) }}%"></div>
+            </td>
+            <td class="num text-green">{{ '+%d'|format(row.added) if row.added else '—' }}</td>
+            <td class="num text-red">{{ '−%d'|format(row.removed) if row.removed else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">No stock moved in this date range.</p>
+  {% endif %}
+</section>
+
+{# ===================== Requests ===================== #}
+<section class="panel">
+  <div class="panel-header">
+    <h2>Employee requests <span class="sub">submitted {{ first_day.strftime('%b %d, %Y') }} – {{ last_day.strftime('%b %d, %Y') }}</span></h2>
+    <a class="btn btn-secondary btn-small" href="{{ url_for('reports.export_requests', **range_args) }}">Export CSV</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total requests</div>
+      <div class="stat-value">{{ request_totals.total }}</div>
+    </div>
+    <div class="stat-card stat-yellow">
+      <div class="stat-label">Pending</div>
+      <div class="stat-value">{{ request_totals.pending }}</div>
+    </div>
+    <div class="stat-card stat-green">
+      <div class="stat-label">Approved</div>
+      <div class="stat-value">{{ request_totals.approved }}</div>
+      <div class="stat-note">incl. restocks received</div>
+    </div>
+    <div class="stat-card stat-red">
+      <div class="stat-label">Rejected</div>
+      <div class="stat-value">{{ request_totals.rejected }}</div>
+    </div>
+  </div>
+
+  {% if employee_rows %}
+    <div class="overview-grid">
+      <div>
+        <h3 class="subhead">By employee</h3>
+        <table class="bar-table">
+          <thead><tr><th>Employee</th><th>Requests</th><th class="num">Total</th><th class="num">Pending</th><th class="num">Approved</th><th class="num">Rejected</th></tr></thead>
+          <tbody>
+            {% for row in employee_rows %}
+              <tr>
+                <td>{{ row.username }}</td>
+                <td class="bar-cell"><div class="bar bar-blue" style="width: {{ (row.total / biggest_employee * 100)|round(1) }}%"></div></td>
+                <td class="num"><strong>{{ row.total }}</strong></td>
+                <td class="num">{{ row.pending }}</td>
+                <td class="num">{{ row.approved }}</td>
+                <td class="num">{{ row.rejected }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3 class="subhead">By type</h3>
+        <table>
+          <thead><tr><th>Type</th><th class="num">Requests</th></tr></thead>
+          <tbody>
+            {% for label, count in type_counts.items() %}
+              <tr><td>{{ label }}</td><td class="num">{{ count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty">No requests were submitted in this date range.</p>
+  {% endif %}
+</section>
+{% endblock %}

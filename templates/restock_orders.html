@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "_macros.html" import request_badge, receive_form, date %}
+{% block title %}Restock orders{% endblock %}
+
+{% block content %}
+{% set this_page = request.full_path.rstrip('?') %}
+
+<header class="page-header product-header">
+  <div>
+    <h1>Restock orders</h1>
+    <p class="muted">Approved restocks waiting for delivery. Inventory goes up only when you record what was received.</p>
+  </div>
+  <div class="header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('alerts.stock_alerts') }}">Stock alerts</a>
+    <a class="btn btn-primary" href="{{ url_for('restock.new_request') }}">+ New restock</a>
+  </div>
+</header>
+
+<nav class="tabs" aria-label="Restock status">
+  {% for key, tab in tabs.items() %}
+    <a href="{{ url_for('restock.orders', show=key) }}" class="tab {{ 'active' if show == key }}">
+      {{ tab[0] }} <span class="tab-count">{{ counts[key] }}</span>
+    </a>
+  {% endfor %}
+</nav>
+
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product</th>
+          <th class="num">Ordered</th>
+          <th class="num">Received</th>
+          <th class="num">Still expected</th>
+          <th>Requested by</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in restocks %}
+          <tr>
+            <td class="mono"><a href="{{ url_for('inventory.request_detail', request_id=req.id) }}">{{ req.id }}</a></td>
+            <td>
+              <a class="product-link" href="{{ url_for('products.detail', product_id=req.product_id) }}">{{ req.product.name }}</a>
+              <div class="sub mono">{{ req.product.sku }} · {{ req.product.quantity }} in stock</div>
+            </td>
+            <td class="num">{{ req.quantity }}</td>
+            <td class="num">{{ req.received_quantity }}</td>
+            <td class="num"><strong>{{ req.remaining_quantity if req.can_receive else '—' }}</strong></td>
+            <td>
+              {{ req.employee.username }}<div class="sub nowrap">{{ date(req.created_at) }}</div>
+              <div class="sub">{{ req.notes }}</div>
+            </td>
+            <td>
+              {{ request_badge(req.status) }}
+              {% if req.manager_note %}<div class="sub">{{ req.manager_note }}</div>{% endif %}
+            </td>
+            <td>
+              {% if req.can_receive %}
+                {{ receive_form(req, this_page) }}
+              {% elif req.status == 'Pending' %}
+                <a class="btn btn-secondary btn-small" href="{{ url_for('inventory.request_detail', request_id=req.id) }}">Review</a>
+              {% else %}
+                <a class="sub" href="{{ url_for('inventory.request_detail', request_id=req.id) }}">View details</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="empty">No restock orders here.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

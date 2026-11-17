@@ -189,7 +189,7 @@ def edit():
             for field, value in new_values.items():
                 setattr(product, field, value)
             # Who changed which fields on which product (time is automatic).
-            log_activity(g.user.id, f"Bulk edited {product.sku}: {changes}", product.id)
+            log_activity(g.user.id, f"Bulk edited {product.sku}: {changes}", product.id, category="bulk_edit")
             changed_count += 1
         db.session.commit()
     except Exception:
@@ -288,7 +288,8 @@ def adjust():
                 )
                 db.session.add(new_request)
                 db.session.flush()
-                log_activity(g.user.id, f"Requested stock change #{new_request.id}: {new_request.summary} for {product.sku}", product.id)
+                log_activity(g.user.id, f"Requested stock change #{new_request.id}: {new_request.summary} for {product.sku}",
+                             product.id, category="request_submitted")
         db.session.commit()
     except StockError as problem:
         db.session.rollback()
@@ -376,7 +377,8 @@ def archive():
                 )
                 db.session.add(new_request)
                 db.session.flush()
-                log_activity(g.user.id, f"Requested deletion #{new_request.id} of {product.sku}", product.id)
+                log_activity(g.user.id, f"Requested deletion #{new_request.id} of {product.sku}", product.id,
+                             category="request_submitted")
         db.session.commit()
     except StockError as problem:
         db.session.rollback()
