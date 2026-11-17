@@ -4,11 +4,10 @@
 <div class="auth-card">
   <div class="auth-brand"><span class="brand-mark">SF</span> {{ site_name }}</div>
   <h1>Log in</h1>
-  <p class="muted">Inventory tracking and damage reporting for your team.</p>
 
   <form method="post" class="form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label for="username">Username</label>
+    <label for="username">Username or email</label>
     <input id="username" name="username" value="{{ username }}" autocomplete="username" required autofocus>
 
     <label for="password">Password</label>
@@ -17,6 +16,6 @@
     <button type="submit" class="btn btn-primary btn-block">Log in</button>
   </form>
 
-  <p class="auth-switch">New employee? <a href="{{ url_for('auth.register') }}">Create an account</a></p>
+  <p class="auth-switch">Accounts are created by your manager.</p>
 </div>
 {% endblock %}

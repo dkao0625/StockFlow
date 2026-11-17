@@ -3,13 +3,18 @@
 {% block title %}Employees{% endblock %}
 
 {% block content %}
-<header class="page-header">
-  <h1>Employees</h1>
-  <p class="muted">Everyone with a {{ site_name }} account. New employees sign up on the register page; managers are added with the <span class="mono">flask create-manager</span> command.</p>
+<header class="page-header product-header">
+  <div>
+    <h1>Employees</h1>
+    <p class="muted">Everyone with a {{ site_name }} account. Only managers can create employee accounts; managers are added with the <span class="mono">flask create-manager</span> command.</p>
+  </div>
+  <div class="header-actions">
+    <a class="btn btn-primary" href="{{ url_for('employees.new_employee') }}">+ Add employee</a>
+  </div>
 </header>
 
 <form method="get" class="filter-bar" role="search">
-  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search username" aria-label="Search username">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search name, username, or email" aria-label="Search employees">
   <select name="role" aria-label="Role">
     <option value="">All roles</option>
     <option value="employee" {{ 'selected' if filters.role == 'employee' }}>Employees</option>
@@ -18,7 +23,7 @@
   <select name="status" aria-label="Account status">
     <option value="">Any status</option>
     <option value="active" {{ 'selected' if filters.status == 'active' }}>Active</option>
-    <option value="deactivated" {{ 'selected' if filters.status == 'deactivated' }}>Deactivated</option>
+    <option value="deactivated" {{ 'selected' if filters.status == 'deactivated' }}>Inactive</option>
   </select>
   <button type="submit" class="btn btn-secondary">Filter</button>
   {% if filters.q or filters.role or filters.status %}
@@ -31,12 +36,14 @@
     <table>
       <thead>
         <tr>
+          <th>Name</th>
           <th>Username</th>
+          <th>Email</th>
           <th>Role</th>
           <th>Status</th>
-          <th>Joined</th>
+          <th>Created</th>
+          <th>Last login</th>
           <th class="num">Requests</th>
-          <th>Last activity</th>
           <th class="actions-col">Actions</th>
         </tr>
       </thead>
@@ -44,23 +51,26 @@
         {% for user in users %}
           <tr>
             <td>
-              <a class="product-link" href="{{ url_for('employees.profile', user_id=user.id) }}">{{ user.username }}</a>
+              <a class="product-link" href="{{ url_for('employees.profile', user_id=user.id) }}">{{ user.full_name or '—' }}</a>
               {% if user.id == g.user.id %}<span class="sub">(you)</span>{% endif %}
             </td>
+            <td class="mono">{{ user.username }}</td>
+            <td>{{ user.email or '—' }}</td>
             <td>{{ user.role|capitalize }}</td>
             <td>
               {% if user.is_active %}<span class="badge badge-green">Active</span>
-              {% else %}<span class="badge badge-red">Deactivated</span>{% endif %}
+              {% else %}<span class="badge badge-red">Inactive</span>{% endif %}
+              {% if user.must_change_password %}<div class="sub">Temporary password</div>{% endif %}
             </td>
             <td class="nowrap">{{ user.created_at.strftime('%b %d, %Y') if user.created_at else '—' }}</td>
+            <td class="nowrap">{{ date(user.last_login_at) if user.last_login_at else 'Never' }}</td>
             <td class="num">{{ request_counts.get(user.id, 0) }}</td>
-            <td class="nowrap">{{ date(last_activity[user.id]) if last_activity.get(user.id) else '—' }}</td>
             <td class="actions-col">
-              <a class="btn btn-secondary btn-small" href="{{ url_for('employees.profile', user_id=user.id) }}">View profile</a>
+              <a class="btn btn-secondary btn-small" href="{{ url_for('employees.profile', user_id=user.id) }}">View</a>
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="empty">No accounts match these filters.</td></tr>
+          <tr><td colspan="9" class="empty">No accounts match these filters.</td></tr>
         {% endfor %}
       </tbody>
     </table>

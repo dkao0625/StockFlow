@@ -4,34 +4,21 @@ from conftest import PASSWORD, login, product_id, submit
 from models import InventoryRequest, User, db
 
 
-def test_register_always_creates_employee(app, client):
-    # Even if someone sneaks role=manager into the form, they get "employee".
-    response = client.post(
-        "/register",
-        data={
-            "username": "Newbie",
-            "password": "longenough1",
-            "confirm_password": "longenough1",
-            "role": "manager",
-        },
-    )
-    assert response.status_code == 302
+def test_public_registration_is_gone(app, client):
+    """The old sign-up URL can't be used to see a form or create an account."""
+    assert client.get("/register").status_code == 404
+    response = client.post("/register", data={
+        "username": "newbie", "password": "longenough1", "confirm_password": "longenough1", "role": "manager",
+    })
+    assert response.status_code == 404
     with app.app_context():
-        user = User.query.filter_by(username="newbie").one()
-        assert user.role == "employee"
-        assert user.password_hash != "longenough1"  # stored hashed
+        assert User.query.filter_by(username="newbie").first() is None
 
 
-def test_register_rejects_short_password_and_duplicates(client):
-    short = client.post(
-        "/register", data={"username": "carl", "password": "short", "confirm_password": "short"}
-    )
-    assert short.status_code == 400
-    duplicate = client.post(
-        "/register",
-        data={"username": "alice", "password": "longenough1", "confirm_password": "longenough1"},
-    )
-    assert duplicate.status_code == 400
+def test_login_page_has_no_sign_up(client):
+    page = client.get("/login").get_data(as_text=True)
+    assert "register" not in page.lower() and "create an account" not in page.lower()
+    assert "Username or email" in page
 
 
 def test_login_success_and_failure(client):

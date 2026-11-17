@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Add employee{% endblock %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('employees.employee_list') }}">← Employees</a>
+<header class="page-header">
+  <h1>Add employee</h1>
+  <p class="muted">Creates an <strong>employee</strong> account. The employee must choose their own password the first time they log in.</p>
+</header>
+
+<section class="panel account-form">
+  <form method="post" class="form" data-submit-once novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="full_name">Full name <span class="req">*</span></label>
+    <input id="full_name" name="full_name" maxlength="100" required value="{{ values.full_name }}"
+           class="{{ 'is-invalid' if errors.full_name }}">
+    {% if errors.full_name %}<p class="field-error">{{ errors.full_name }}</p>{% endif %}
+
+    <div class="row">
+      <div>
+        <label for="username">Username <span class="req">*</span></label>
+        <input id="username" name="username" maxlength="30" required autocomplete="off" value="{{ values.username }}"
+               class="{{ 'is-invalid' if errors.username }}">
+        {% if errors.username %}<p class="field-error">{{ errors.username }}</p>
+        {% else %}<p class="hint">3–30 letters, numbers, or underscores.</p>{% endif %}
+      </div>
+      <div>
+        <label for="email">Email <span class="req">*</span></label>
+        <input id="email" name="email" type="email" maxlength="254" required autocomplete="off" value="{{ values.email }}"
+               class="{{ 'is-invalid' if errors.email }}">
+        {% if errors.email %}<p class="field-error">{{ errors.email }}</p>{% endif %}
+      </div>
+    </div>
+
+    <fieldset class="password-choice">
+      <legend>Temporary password <span class="req">*</span></legend>
+      <label class="toggle">
+        <input type="radio" name="password_choice" value="generate" {{ 'checked' if password_choice != 'manual' }}>
+        Generate a secure password for me (shown once after saving)
+      </label>
+      <label class="toggle">
+        <input type="radio" name="password_choice" value="manual" {{ 'checked' if password_choice == 'manual' }}>
+        I'll type one
+      </label>
+      <input id="temporary_password" name="temporary_password" type="password" autocomplete="new-password"
+             placeholder="Only used if you choose “I'll type one”" aria-label="Temporary password"
+             class="{{ 'is-invalid' if errors.temporary_password }}">
+      {% if errors.temporary_password %}<p class="field-error">{{ errors.temporary_password }}</p>
+      {% else %}<p class="hint">At least 10 characters, with a letter and a number, not containing the username.</p>{% endif %}
+    </fieldset>
+
+    <dl class="details auto-fields">
+      <dt>Role</dt><dd>Employee</dd>
+      <dt>Status</dt><dd>Active</dd>
+      <dt>Password change</dt><dd>Required at first login</dd>
+    </dl>
+
+    <button type="submit" class="btn btn-primary" data-busy-text="Creating…">Create employee</button>
+  </form>
+</section>
+{% endblock %}

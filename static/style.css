@@ -469,3 +469,12 @@ tr.row-attention td { background: #fff9f2; }
 .timeline li.timeline-approved::before, .timeline li.timeline-received::before { border-color: var(--green); }
 .timeline li.timeline-rejected::before, .timeline li.timeline-closed::before { border-color: var(--red); }
 .timeline-note { margin-top: 4px; padding: 6px 10px; background: #f8fafc; border-radius: 6px; font-style: italic; }
+
+/* ---------- Employee accounts ---------- */
+
+.account-form { max-width: 720px; }
+.password-choice { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px 14px; margin: 16px 0 0; }
+.password-choice legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+.password-choice .toggle { font-weight: 500; margin: 6px 0; }
+.auto-fields { margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; }
+.temp-password { font-size: 22px; font-weight: 700; letter-spacing: 1px; margin: 8px 0; user-select: all; }

@@ -83,8 +83,16 @@ class User(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(30), unique=True, nullable=False, index=True)
+    # Optional for accounts made before managers created accounts. Always
+    # stored in lowercase; UNIQUE so two accounts can't share one.
+    email = db.Column(db.String(254), unique=True, nullable=True)
+    full_name = db.Column(db.String(100), nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_EMPLOYEE)
+    # True for accounts with a temporary password (made or reset by a
+    # manager): they must choose their own password before using the app.
+    must_change_password = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     # Every time a user logs out, this number goes up by one. The login
     # session stores the number it was created with; if they no longer
@@ -109,6 +117,10 @@ class User(db.Model):
     @property
     def is_manager(self):
         return self.role == ROLE_MANAGER
+
+    @property
+    def display_name(self):
+        return self.full_name or self.username
 
 
 class Product(db.Model):

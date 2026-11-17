@@ -7,9 +7,9 @@
 
 <header class="page-header product-header">
   <div>
-    <h1>{{ user.username }}</h1>
+    <h1>{{ user.display_name }}</h1>
     <p class="muted">
-      {{ user.role|capitalize }} ·
+      <span class="mono">{{ user.username }}</span> · {{ user.role|capitalize }} ·
       {% if user.is_active %}<span class="badge badge-green">Active</span>{% else %}<span class="badge badge-red">Deactivated</span>{% endif %}
     </p>
   </div>
@@ -52,8 +52,13 @@
 
 <section class="panel">
   <dl class="details">
-    <dt>Joined</dt><dd>{{ date(user.created_at) if user.created_at else '—' }}</dd>
+    <dt>Full name</dt><dd>{{ user.full_name or '—' }}</dd>
+    <dt>Username</dt><dd class="mono">{{ user.username }}</dd>
+    <dt>Email</dt><dd>{{ user.email or '—' }}</dd>
+    <dt>Created</dt><dd>{{ date(user.created_at) if user.created_at else '—' }}</dd>
+    <dt>Last login</dt><dd>{{ date(user.last_login_at) if user.last_login_at else 'Never' }}</dd>
     <dt>Last activity</dt><dd>{{ date(last_activity) if last_activity else '—' }}</dd>
+    <dt>Password</dt><dd>{{ 'Temporary — must be changed at next login' if user.must_change_password else 'Set by the user' }}</dd>
   </dl>
 </section>
 

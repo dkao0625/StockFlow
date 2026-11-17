@@ -25,12 +25,33 @@ from flask import (
     url_for,
 )
 
-from models import ROLE_EMPLOYEE, ROLE_MANAGER, User, db, log_activity
+from models import ROLE_EMPLOYEE, ROLE_MANAGER, User, db, log_activity, utc_now
 
 auth_bp = Blueprint("auth", __name__)
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9_]{3,30}$")
-MIN_PASSWORD_LENGTH = 8
+MIN_PASSWORD_LENGTH = 8           # used by the `flask create-manager` command
+NEW_PASSWORD_MIN_LENGTH = 10      # temporary passwords and password changes
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_EMAIL_LENGTH = 254
+MAX_FULL_NAME_LENGTH = 100
+
+
+def password_problem(password, username=""):
+    """
+    Why this password is too weak, or None if it's fine.
+    Rules: at least 10 characters, with a letter and a number, and not
+    containing the username.
+    """
+    if len(password) < NEW_PASSWORD_MIN_LENGTH:
+        return f"Password must be at least {NEW_PASSWORD_MIN_LENGTH} characters."
+    if len(password) > 128:
+        return "Password must be 128 characters or fewer."
+    if not re.search(r"[A-Za-z]", password) or not re.search(r"[0-9]", password):
+        return "Password must contain at least one letter and one number."
+    if username and username.lower() in password.lower():
+        return "Password can't contain the username."
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -118,46 +139,10 @@ def home_for(user):
 # Routes
 # ---------------------------------------------------------------------------
 
-@auth_bp.route("/register", methods=["GET", "POST"])
-def register():
-    if g.user is not None:
-        return redirect(home_for(g.user))
-
-    if request.method == "POST":
-        username = request.form.get("username", "").strip().lower()
-        password = request.form.get("password", "")
-        confirm_password = request.form.get("confirm_password", "")
-
-        # Server-side validation (never trust the browser alone).
-        error = None
-        if not USERNAME_PATTERN.match(username):
-            error = "Username must be 3-30 characters: letters, numbers, or underscores."
-        elif len(password) < MIN_PASSWORD_LENGTH:
-            error = f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
-        elif password != confirm_password:
-            error = "Passwords do not match."
-        elif User.query.filter_by(username=username).first() is not None:
-            error = "That username is already taken."
-
-        if error:
-            flash(error, "error")
-            return render_template("register.html", username=username), 400
-
-        # Public registration ALWAYS creates an employee. Any "role" field
-        # someone adds to the form is ignored. Managers are created with
-        # the `flask create-manager` command instead.
-        new_user = User(username=username, role=ROLE_EMPLOYEE)
-        new_user.set_password(password)
-        db.session.add(new_user)
-        db.session.flush()  # assigns new_user.id so we can log it
-        log_activity(new_user.id, f"Registered employee account '{username}'",
-                     category="account", target_user_id=new_user.id)
-        db.session.commit()
-
-        flash("Account created. Please log in.", "success")
-        return redirect(url_for("auth.login"))
-
-    return render_template("register.html", username="")
+# There is NO public registration. Accounts are created by managers on the
+# Employees page (employee accounts) or with `flask create-manager` (manager
+# accounts, needs database access). The old /register URL no longer exists,
+# so visiting or posting to it returns 404.
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -168,7 +153,8 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip().lower()
         password = request.form.get("password", "")
-        user = User.query.filter_by(username=username).first()
+        # Log in with either the username or the email address.
+        user = User.query.filter(db.or_(User.username == username, User.email == username)).first()
 
         # Same message for "no such user" and "wrong password" so attackers
         # can't discover which usernames exist.
@@ -187,6 +173,7 @@ def login():
         session["session_version"] = user.session_version
         session.permanent = True  # expires after PERMANENT_SESSION_LIFETIME
 
+        user.last_login_at = utc_now()
         log_activity(user.id, "Logged in", category="login")
         db.session.commit()
         return redirect(home_for(user))

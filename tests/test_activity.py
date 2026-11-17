@@ -88,16 +88,20 @@ def test_rejection_and_bulk_edit_are_recorded(app, client):
 
 
 def test_passwords_are_never_logged(app, client):
-    client.post("/register", data={"username": "newbie", "password": "secret-pass-123",
-                                   "confirm_password": "secret-pass-123"})
+    login(client, "boss")
+    client.post("/employees/new", data={
+        "full_name": "New Bie", "username": "newbie", "email": "newbie@example.com",
+        "password_choice": "manual", "temporary_password": "secret-pass-123",
+    })
+    client.post("/logout")
     login(client, "newbie", "secret-pass-123")
     login(client, "alice")
     with app.app_context():
         for entry in ActivityLog.query.all():
             assert "secret-pass-123" not in entry.action
             assert PASSWORD not in entry.action
-        registration = ActivityLog.query.filter_by(category="account").one()
-        assert registration.target_user.username == "newbie"
+        creation = ActivityLog.query.filter_by(category="account").one()
+        assert creation.target_user.username == "newbie"
 
 
 def test_activity_rows_cannot_be_changed_or_deleted(app, client):

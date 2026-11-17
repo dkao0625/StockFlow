@@ -38,7 +38,7 @@ def test_list_shows_accounts_and_request_counts(app, client):
     page = client.get("/employees").get_data(as_text=True)
     for name in ["alice", "bob", "boss"]:
         assert name in page
-    alice_row = page.split(">alice</a>")[1].split("</tr>")[0]
+    alice_row = page.split('<td class="mono">alice</td>')[1].split("</tr>")[0]
     assert '<td class="num">2</td>' in alice_row
 
 
@@ -51,7 +51,7 @@ def test_profile_shows_requests_and_no_password(app, client):
     page = client.get(f"/employees/{alice.id}").get_data(as_text=True)
     assert "Damaged inventory" in page
     assert alice.password_hash not in page
-    assert "password" not in page.lower()
+    assert "pbkdf2" not in page and "scrypt" not in page  # no hash of any kind
 
 
 def test_deactivated_user_is_locked_out_immediately(app, client):
@@ -137,7 +137,8 @@ def test_last_active_manager_cannot_be_deactivated(app):
     assert user(app, "boss2").is_active
 
 
-def test_registration_still_creates_employees_only(app, client):
+def test_old_registration_url_creates_nothing(app, client):
     client.post("/register", data={"username": "sneaky", "password": "long-enough-1",
                                    "confirm_password": "long-enough-1", "role": "manager"})
-    assert user(app, "sneaky").role == "employee"
+    with app.app_context():
+        assert User.query.filter_by(username="sneaky").first() is None
