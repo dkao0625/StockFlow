@@ -52,10 +52,19 @@ def create_app(test_config=None):
 
     app_env = os.environ.get("APP_ENV", "production")
 
+    # Each environment has its own database: DATABASE_URL_PROD on Cloud Run,
+    # DATABASE_URL_DEV on your laptop. (DATABASE_URL_TEST is used by pytest,
+    # see tests/conftest.py.) Plain DATABASE_URL is still accepted as a fallback.
+    db_url_var = "DATABASE_URL_PROD" if app_env == "production" else "DATABASE_URL_DEV"
+
     app.config.update(
         APP_ENV=app_env,
         SECRET_KEY=os.environ.get("SECRET_KEY"),
-        SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL"),
+        SQLALCHEMY_DATABASE_URI=os.environ.get(db_url_var) or os.environ.get("DATABASE_URL"),
+        # Name shown in the page title, header, and login screen.
+        SITE_NAME=os.environ.get("SITE_NAME") or "StockFlow",
+        # Suggested username when running `flask create-manager`.
+        ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME", ""),
         # Neon closes idle connections; pre_ping checks a connection is
         # alive before using it, and recycle replaces old connections.
         SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True, "pool_recycle": 280},
@@ -78,7 +87,7 @@ def create_app(test_config=None):
         raise RuntimeError("SECRET_KEY is not set. Copy .env.example to .env and fill it in.")
     if not app.config["SQLALCHEMY_DATABASE_URI"]:
         raise RuntimeError(
-            "DATABASE_URL is not set. Paste your Neon connection string into .env "
+            f"{db_url_var} is not set. Paste your Neon connection string into .env "
             "(Neon console -> Connect)."
         )
     # Neon gives "postgresql://..." (some providers use "postgres://").
@@ -102,6 +111,10 @@ def create_app(test_config=None):
     app.register_blueprint(inventory_bp)
     app.register_blueprint(products_bp)
     app.register_blueprint(bulk_bp)
+
+    @app.context_processor
+    def inject_site_name():
+        return {"site_name": app.config["SITE_NAME"]}
 
     register_error_pages(app)
     register_cli_commands(app)
@@ -130,7 +143,12 @@ def register_error_pages(app):
 
 def register_cli_commands(app):
     @app.cli.command("create-manager")
-    @click.option("--username", prompt=True, help="Manager username")
+    @click.option(
+        "--username",
+        prompt=True,
+        default=lambda: app.config["ADMIN_USERNAME"] or None,
+        help="Manager username (defaults to ADMIN_USERNAME from .env)",
+    )
     @click.password_option(help="Manager password (you will be prompted)")
     def create_manager_command(username, password):
         """Create a manager account. Only people with database access can run this."""

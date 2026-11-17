@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}StockFlow{% endblock %} · StockFlow</title>
+  <title>{% block title %}{{ site_name }}{% endblock %} · {{ site_name }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
@@ -13,7 +13,7 @@
   <aside class="sidebar">
     <div class="brand">
       <span class="brand-mark">SF</span>
-      <span class="brand-name">StockFlow</span>
+      <span class="brand-name">{{ site_name }}</span>
     </div>
 
     <nav class="nav">

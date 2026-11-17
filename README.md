@@ -2,7 +2,7 @@
 This is the OMIS 107 Final Project.
 Created by Stephanie Chen and Dylan Kao
 
-**Live prototype:** _TODO: add Cloud Run URL here_
+**Live prototype:** https://stockflow-22360269486.us-east5.run.app
 
 StockFlow is a small inventory management web app for small businesses and warehouse teams. Employees can see stock levels and report damaged or missing items. Managers review those reports, and stock is updated automatically when a manager approves one.
 
@@ -104,7 +104,7 @@ cp .env.example .env
 python3 -c "import secrets; print(secrets.token_hex(32))"   # paste this as SECRET_KEY
 ```
 
-Edit `.env` and set `SECRET_KEY` and `DATABASE_URL` (the Neon string). Keep `APP_ENV=development` locally. `.env` is in `.gitignore`, so **never commit it**.
+Edit `.env` and set `SECRET_KEY`, `DATABASE_URL_DEV` (the Neon string your laptop uses), and `DATABASE_URL_PROD` (the Neon string the live site uses; can be the same database). `SITE_NAME` sets the name shown in the app, and `ADMIN_USERNAME` is the default username for `create-manager`. Keep `APP_ENV=development` locally. `.env` is in `.gitignore`, so **never commit it**.
 
 ### 4. Create tables, the first manager, and sample data
 
@@ -167,10 +167,12 @@ The tests use a temporary SQLite file, so they don't need Neon. They cover:
 **Row locking** (`SELECT … FOR UPDATE`) only takes effect on PostgreSQL. `tests/test_concurrency.py` fires two simultaneous approvals and is skipped unless you point it at a **throwaway** Postgres database. In Neon, create a separate branch (Branches → New branch, e.g. `test`) and use its connection string:
 
 ```bash
-TEST_DATABASE_URL="postgresql://...test-branch...?sslmode=require" pytest
+DATABASE_URL_TEST="postgresql://...test-branch...?sslmode=require" pytest
 ```
 
-⚠️ Tests delete every table in `TEST_DATABASE_URL`. Never use your main database for this. The tests refuse to run if it matches `DATABASE_URL`.
+You can also set `DATABASE_URL_TEST` in `.env`; leave it blank to test on SQLite.
+
+⚠️ Tests delete every table in `DATABASE_URL_TEST`. Never use your main database for this. The tests refuse to run if it matches `DATABASE_URL_DEV` or `DATABASE_URL_PROD`.
 
 ## Deploying to Google Cloud Run
 
@@ -179,20 +181,34 @@ You need a Google Cloud project with billing enabled. Cloud Run has a free tier,
 ```bash
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+
+# Store the secrets in Secret Manager (paste the value, then press Ctrl-D)
+gcloud secrets create stockflow-secret-key --data-file=-
+gcloud secrets create stockflow-database-url --data-file=-
+
+# Let Cloud Run read them (PROJECT_NUMBER: gcloud projects describe YOUR_PROJECT_ID)
+for s in stockflow-secret-key stockflow-database-url; do
+  gcloud secrets add-iam-policy-binding $s \
+    --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+    --role=roles/secretmanager.secretAccessor
+done
 
 gcloud run deploy stockflow \
   --source . \
   --region us-east5 \
   --allow-unauthenticated \
-  --set-env-vars "SECRET_KEY=YOUR_LONG_RANDOM_KEY,DATABASE_URL=YOUR_NEON_CONNECTION_STRING"
+  --set-secrets "SECRET_KEY=stockflow-secret-key:latest,DATABASE_URL_PROD=stockflow-database-url:latest" \
+  --set-env-vars "SITE_NAME=StockFlow"
 ```
+
+To redeploy after code changes: `gcloud run deploy stockflow --source . --region us-east5` (settings carry over).
 
 `--source .` makes Cloud Build build the `Dockerfile` for you, so you don't need Docker installed. When the command finishes it prints the public URL. Put it at the top of this README.
 
 Notes:
-- If your `DATABASE_URL` contains commas, use `--set-env-vars "^@^SECRET_KEY=...@DATABASE_URL=..."` (this changes the separator to `@`). A safer option is Secret Manager (`--set-secrets`).
-- Run `db upgrade`, `create-manager`, and (for the demo) `seed-demo` **from your laptop** with `.env` pointing at the same Neon database. Cloud Run's filesystem is temporary, so all data lives in Neon.
+- To change the production database, add a new version of the secret (`gcloud secrets versions add stockflow-database-url --data-file=-`) and redeploy.
+- Run `db upgrade`, `create-manager`, and (for the demo) `seed-demo` **from your laptop** with `DATABASE_URL_DEV` pointing at the production Neon database. Cloud Run's filesystem is temporary, so all data lives in Neon.
 - The container sets `APP_ENV=production`, which makes session cookies HTTPS-only.
 
 ## Security measures
@@ -206,7 +222,7 @@ Notes:
 - Quantities, reasons, notes, usernames, and every product field (required fields, lengths, dropdown values, money format) are validated on the server.
 - The database has CHECK constraints (`quantity >= 0` and `unit_cost >= 0` on products, valid category/unit/status/role values, `quantity > 0` on requests). SKUs are UNIQUE, and a request can create at most one stock movement (also UNIQUE).
 - Unit cost is only shown to managers.
-- Secrets come only from environment variables. The app refuses to start without `SECRET_KEY` and `DATABASE_URL`.
+- Secrets come only from environment variables. The app refuses to start without `SECRET_KEY` and a database URL (`DATABASE_URL_DEV` locally, `DATABASE_URL_PROD` on Cloud Run).
 
 ## Checkpoint status (HW6)
 

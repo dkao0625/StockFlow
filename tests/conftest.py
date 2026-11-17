@@ -22,10 +22,18 @@ PASSWORD = "correct-horse-1"
 
 @pytest.fixture
 def app(tmp_path):
-    test_db_url = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{tmp_path / 'test.db'}"
-    # Tests DELETE all tables. Never let them touch the real app database.
-    if test_db_url == os.environ.get("DATABASE_URL"):
-        pytest.exit("TEST_DATABASE_URL must be a separate, throwaway database.", returncode=2)
+    test_db_url = (
+        os.environ.get("DATABASE_URL_TEST")
+        or os.environ.get("TEST_DATABASE_URL")
+        or f"sqlite:///{tmp_path / 'test.db'}"
+    )
+    # Tests DELETE all tables. Never let them touch a real app database.
+    real_urls = {
+        os.environ.get(name)
+        for name in ("DATABASE_URL", "DATABASE_URL_DEV", "DATABASE_URL_PROD")
+    } - {None, ""}
+    if test_db_url in real_urls:
+        pytest.exit("DATABASE_URL_TEST must be a separate, throwaway database.", returncode=2)
     app = create_app(
         {
             "TESTING": True,
