@@ -7,13 +7,14 @@ Production:       gunicorn "app:create_app()"   (see Dockerfile)
 Setup commands (run from your own computer, never exposed on the web):
   flask --app app db upgrade       Create/upgrade database tables (Flask-Migrate)
   flask --app app create-manager   Create a manager account (prompts for password)
-  flask --app app seed-demo        Add sample products (development only)
+  flask --app app seed-products    Add 12 demo products (asks first; refuses production)
 """
 
 import os
 from datetime import timedelta
 
 import click
+from sqlalchemy.engine import make_url
 from dotenv import load_dotenv
 from flask import Flask, render_template
 from flask_migrate import Migrate
@@ -31,7 +32,7 @@ from activity import activity_bp
 from employees import employees_bp
 from reports import reports_bp
 from account import profile_bp
-from models import ROLE_MANAGER, Product, User, db, log_activity
+from models import ROLE_MANAGER, User, db, log_activity
 
 # Read variables from a local .env file (if present) into os.environ.
 # On Cloud Run there is no .env file; variables are set on the service.
@@ -41,17 +42,6 @@ csrf = CSRFProtect()
 # Flask-Migrate keeps the database schema in sync with models.py using
 # versioned migration scripts in the migrations/ folder.
 migrate = Migrate()
-
-SAMPLE_PRODUCTS = [
-    # (sku, name, category, unit, quantity, reorder_level, location)
-    ("SF-1001", "Cardboard Shipping Box (Medium)", "Packaging Supplies", "Boxes", 240, 50, "Warehouse A, Aisle 1"),
-    ("SF-1002", "Packing Tape Roll", "Packaging Supplies", "Rolls", 35, 40, "Warehouse A, Aisle 1"),
-    ("SF-1003", "Bubble Wrap (50 ft)", "Packaging Supplies", "Rolls", 18, 10, "Warehouse A, Aisle 2"),
-    ("SF-1004", "Wireless Barcode Label Printer", "Electronics", "Pieces", 4, 5, "Office, Cabinet 2"),
-    ("SF-1005", "Pallet Jack", "Other", "Pieces", 2, 1, "Loading Dock"),
-    ("SF-1006", "Safety Gloves", "Clothing", "Pairs", 0, 20, "Warehouse B, Shelf 4"),
-]
-
 
 def create_app(test_config=None):
     """Application factory: builds and configures the Flask app."""
@@ -187,27 +177,55 @@ def register_cli_commands(app):
         db.session.commit()
         click.echo(f"Manager '{username}' created.")
 
-    @app.cli.command("seed-demo")
-    def seed_demo_command():
-        """Add sample products. Skips any SKU that already exists."""
-        if app.config["APP_ENV"] != "development":
-            raise click.ClickException(
-                "seed-demo only runs when APP_ENV=development."
-            )
-        added = 0
-        for sku, name, category, unit, quantity, reorder_level, location in SAMPLE_PRODUCTS:
-            if Product.query.filter_by(sku=sku).first():
-                continue  # never overwrite existing data
-            db.session.add(
-                Product(
-                    sku=sku, name=name, category=category, unit=unit, quantity=quantity,
-                    reorder_level=reorder_level, location=location,
-                )
-            )
-            added += 1
-        db.session.commit()
-        click.echo(f"Added {added} sample product(s); {len(SAMPLE_PRODUCTS) - added} already existed.")
+    def database_description():
+        """Which database the app is connected to, WITHOUT the password: (text, is_production)."""
+        target = make_url(app.config["SQLALCHEMY_DATABASE_URI"])
+        prod_url = os.environ.get("DATABASE_URL_PROD")
+        same_as_prod = False
+        if prod_url:
+            prod = make_url(prod_url)
+            same_as_prod = (prod.host, prod.database) == (target.host, target.database)
+        is_production = app.config["APP_ENV"] == "production" or same_as_prod
+        text = f"{target.host or 'local file'} / {target.database} (APP_ENV={app.config['APP_ENV']})"
+        return text, is_production
 
+    @app.cli.command("seed-products")
+    @click.option("--yes", is_flag=True, help="Don't ask for confirmation (development databases only).")
+    @click.option("--allow-production", is_flag=True,
+                  help="Allow seeding the PRODUCTION database (still asks you to type a confirmation).")
+    def seed_products_command(yes, allow_production):
+        """Add 12 fictional demo products. Skips SKUs that already exist; never changes existing stock."""
+        from inventory import active_products, inventory_stats
+        from seed_data import DEMO_PRODUCTS, seed_products
+
+        target, is_production = database_description()
+        click.echo(f"Database: {target}")
+        if is_production:
+            if not allow_production:
+                raise click.ClickException(
+                    "This is the PRODUCTION database. Demo data isn't added there by accident: "
+                    "re-run with --allow-production if you really want to."
+                )
+            typed = click.prompt('This adds demo products to PRODUCTION. Type "SEED DEMO DATA" to continue')
+            if typed.strip() != "SEED DEMO DATA":
+                raise click.ClickException("Cancelled. Nothing was changed.")
+        elif not yes:
+            click.confirm(f"Add up to {len(DEMO_PRODUCTS)} demo products to this database?", abort=True)
+
+        added, skipped = seed_products()
+        click.echo(f"Added {len(added)} product(s); skipped {len(skipped)} that already existed"
+                   + (f" ({', '.join(skipped)})." if skipped else "."))
+        stats = inventory_stats(active_products())
+        click.echo(f"Inventory now: {stats['total_products']} products, {stats['total_units']:,} units, "
+                   f"{stats['low_stock']} low stock, {stats['out_of_stock']} out of stock.")
+
+    @app.cli.command("seed-demo")
+    @click.pass_context
+    def seed_demo_command(ctx):
+        """Old name for seed-products (development only)."""
+        if app.config["APP_ENV"] != "development":
+            raise click.ClickException("seed-demo only runs when APP_ENV=development. Use seed-products.")
+        ctx.invoke(seed_products_command, yes=True, allow_production=False)
 
 # `python3 app.py` runs the local development server.
 # Port 5001 by default because macOS AirPlay Receiver already uses 5000.

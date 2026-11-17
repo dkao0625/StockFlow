@@ -137,7 +137,8 @@ Every bulk action is saved in **one database transaction**: if any row is invali
 ## Project structure
 
 ```text
-app.py              App factory, configuration, CLI commands (create-manager, seed-demo)
+app.py              App factory, configuration, CLI commands (create-manager, seed-products)
+seed_data.py        The 12 fictional demo products used by `flask seed-products`
 models.py           Database tables: User, Product, InventoryRequest, RequestEvent, StockMovement, StockReceipt, ActivityLog
 auth.py             Login / logout, first-login and voluntary password change, password rules, and the login_required / manager_required decorators
 inventory.py        Inventory, employee dashboard, Report a problem, My Requests, Approvals, request details,
@@ -199,10 +200,26 @@ Edit `.env` and set `SECRET_KEY`, `DATABASE_URL_DEV` (the Neon string your lapto
 ```bash
 flask --app app db upgrade       # creates or upgrades the tables in Neon (safe to re-run)
 flask --app app create-manager   # prompts for username + password (hidden)
-flask --app app seed-demo        # adds 6 sample products; skips any that already exist
+flask --app app seed-products    # adds 12 demo products; skips any SKU that already exists
 ```
 
-There is no way to sign up as a manager through the website. `create-manager` only works for someone who has the database credentials, so the manager account is protected. `seed-demo` refuses to run unless `APP_ENV=development`.
+There is no way to sign up as a manager through the website. `create-manager` only works for someone who has the database credentials, so the manager account is protected. `seed-products` first shows which database it will change and asks for confirmation (see **Demo data** below).
+
+### Demo data (`flask seed-products`)
+
+Adds 12 fictional products (packaging, office supplies, electronics, clothing, and other) with descriptions, units, locations, suppliers, and unit costs. On an empty database you get **12 products, 888 units on hand, 4 low-stock products, and 1 out-of-stock product**.
+
+- **Safe to run again:** products whose SKU already exists are skipped and never changed, so nothing is duplicated and no existing quantities change.
+- **Stock history:** each new product gets a "Starting stock (demo data)" stock movement and a "Product created" activity entry, the same as adding a product in the app. No users or requests are created.
+- **All or nothing:** everything is saved in one transaction; if anything fails, nothing is saved.
+- **Production is protected:** the command prints the database host and `APP_ENV` first. It refuses to touch the production database (`APP_ENV=production`, or a URL pointing at the same database as `DATABASE_URL_PROD`) unless you add `--allow-production` *and* type `SEED DEMO DATA`.
+
+```bash
+flask --app app seed-products          # dev database: shows it, asks "Continue? [y/N]"
+flask --app app seed-products --yes    # dev database, no question
+```
+
+(`flask seed-demo` is the old name and runs the same thing, development only.)
 
 **After pulling new code from GitHub, run `flask --app app db upgrade`.** It applies any new migrations and does nothing if the database is already up to date.
 
@@ -275,6 +292,7 @@ With `DATABASE_URL_TEST` blank, the tests use a temporary SQLite file and need n
 - **My Profile (`test_profile.py`):** both roles see only their own profile (ids in the URL are ignored), placeholders for missing details, recent activity, the sidebar link, editing your own name and email (role, status, username, and other users can't be changed), validation and duplicate emails, and changing your password from the profile (current password required, other sessions logged out, no off-site redirects).
 - **Accounts and passwords (`test_accounts.py`, `test_password_management.py`):** no public sign-up, manager-created employees, validation and duplicates, first-login password change enforced on every route, password reset, and editing employees.
 - **Deleting and restoring (`test_employee_deletion.py`):** soft deletion with a required reason, confirmation details, employees/managers/self/unauthenticated blocked, sessions and logins refused, deleted accounts hidden from normal lists and shown in the Deleted view (search and dates), history kept under the employee's real name, restoring with a temporary password, and the full delete/restore history kept.
+- **Demo data (`test_seed.py`):** the expected totals on an empty database, stock history matching quantities, running twice adds nothing, existing products are untouched, all-or-nothing on errors, no fake users or requests, products on the Inventory page, and the production safeguards.
 - **Reports and CSV (`test_reports.py`):** manager-only reports and exports, movement and request totals by date range, exports respecting filters, formula-injection protection, and no secrets in any export.
 
 **Row locking** (`SELECT … FOR UPDATE`) only takes effect on PostgreSQL. `tests/test_concurrency.py` fires two simultaneous approvals and is skipped unless you point it at a **throwaway** Postgres database. In Neon, create a separate branch (Branches → New branch, e.g. `test`) and use its connection string:
@@ -289,7 +307,7 @@ You can also set `DATABASE_URL_TEST` in `.env`; leave it blank to test on SQLite
 
 ## Manual test guide
 
-Run locally against the **dev** branch (`flask --app app run --debug`). Use two browsers (or a normal and a private window) so an employee and a manager can be logged in at the same time. If the dev database is empty, create an employee from **Employees → + Add employee** and run `flask --app app seed-demo`.
+Run locally against the **dev** branch (`flask --app app run --debug`). Use two browsers (or a normal and a private window) so an employee and a manager can be logged in at the same time. If the dev database is empty, create an employee from **Employees → + Add employee** and run `flask --app app seed-products`.
 
 | Feature | Try this | You should see |
 |---|---|---|
