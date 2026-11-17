@@ -14,6 +14,10 @@
     </p>
   </div>
   <div class="header-actions">
+    {% if g.user.is_manager %}
+      {# Same filters as the list on screen #}
+      <a class="btn btn-secondary" href="{{ url_for('inventory.export_inventory', **request.args) }}">Export CSV</a>
+    {% endif %}
     <a class="btn btn-secondary" href="{{ url_for('products.new_product') }}">+ Add product</a>
   </div>
 </header>

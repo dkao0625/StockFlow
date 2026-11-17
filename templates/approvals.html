@@ -7,9 +7,14 @@
 {% set this_page = request.full_path.rstrip('?') %}
 {% set filter_args = {'type': filters.type or None, 'employee': filters.employee or None} %}
 
-<header class="page-header">
-  <h1>Approvals</h1>
-  <p class="muted">Review stock adjustments, damage reports, and deletion requests from employees.</p>
+<header class="page-header product-header">
+  <div>
+    <h1>Approvals</h1>
+    <p class="muted">Review stock adjustments, damage reports, restock, and deletion requests from employees.</p>
+  </div>
+  <div class="header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('inventory.export_requests', status=filters.status, **filter_args) }}">Export CSV</a>
+  </div>
 </header>
 
 {# Status tabs. Each keeps the type/employee filters. #}

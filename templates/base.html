@@ -38,6 +38,8 @@
            class="{{ 'active' if endpoint == 'activity.activity_log' }}">Activity</a>
         <a href="{{ url_for('employees.employee_list') }}"
            class="{{ 'active' if endpoint.startswith('employees.') }}">Employees</a>
+        <a href="{{ url_for('reports.reports') }}"
+           class="{{ 'active' if endpoint.startswith('reports.') }}">Reports</a>
       {% else %}
         <a href="{{ url_for('activity.my_activity') }}"
            class="{{ 'active' if endpoint == 'activity.my_activity' }}">My Activity</a>

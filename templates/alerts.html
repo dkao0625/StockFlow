@@ -16,6 +16,7 @@
   </div>
   <div class="header-actions">
     {% if g.user.is_manager %}
+      <a class="btn btn-secondary" href="{{ url_for('alerts.export_alerts', **request.args) }}">Export CSV</a>
       <a class="btn btn-secondary" href="{{ url_for('restock.orders') }}">Restock orders</a>
     {% endif %}
     <a class="btn btn-primary" href="{{ url_for('restock.new_request') }}">+ Request restock</a>
