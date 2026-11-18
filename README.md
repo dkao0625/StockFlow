@@ -137,7 +137,7 @@ Every bulk action is saved in **one database transaction**: if any row is invali
 ## Project structure
 
 ```text
-app.py              App factory, configuration, CLI commands (create-manager, seed-products)
+app.py              App factory, configuration, CLI commands (create-manager, reset-manager-password, seed-products)
 seed_data.py        The 12 fictional demo products used by `flask seed-products`
 models.py           Database tables: User, Product, InventoryRequest, RequestEvent, StockMovement, StockReceipt, ActivityLog
 auth.py             Login / logout, first-login and voluntary password change, password rules, and the login_required / manager_required decorators
@@ -203,7 +203,19 @@ flask --app app create-manager   # prompts for username + password (hidden)
 flask --app app seed-products    # adds 12 demo products; skips any SKU that already exists
 ```
 
-There is no way to sign up as a manager through the website. `create-manager` only works for someone who has the database credentials, so the manager account is protected. `seed-products` first shows which database it will change and asks for confirmation (see **Demo data** below).
+There is no way to sign up as a manager through the website. `create-manager` only works for someone who has the database credentials, so the manager account is protected.
+
+**Forgot a manager password?** Passwords are stored only as hashes, so nobody can look one up. Set a new one with:
+
+```bash
+flask --app app reset-manager-password                # prompts for username + new password (hidden)
+flask --app app reset-manager-password --temporary    # they must choose their own at next login
+APP_ENV=production flask --app app reset-manager-password   # for the live site
+```
+
+It shows which database it will change and asks before saving, uses the same password rules as the app, and logs the manager out of any open sessions. Employee passwords are reset in the app instead (**Employees → profile → Reset password**).
+
+`seed-products` first shows which database it will change and asks for confirmation (see **Demo data** below).
 
 ### Demo data (`flask seed-products`)
 
