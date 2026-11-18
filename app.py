@@ -7,7 +7,6 @@ Production:       gunicorn "app:create_app()"   (see Dockerfile)
 Setup commands (run from your own computer, never exposed on the web):
   flask --app app db upgrade       Create/upgrade database tables (Flask-Migrate)
   flask --app app create-manager   Create a manager account (prompts for password)
-  flask --app app reset-manager-password   New password for a manager account
   flask --app app seed-products    Add 12 demo products (asks first; refuses production)
 """
 
@@ -177,44 +176,6 @@ def register_cli_commands(app):
                      category="account", target_user_id=manager.id)
         db.session.commit()
         click.echo(f"Manager '{username}' created.")
-
-    @app.cli.command("reset-manager-password")
-    @click.option("--username", prompt=True, help="The manager whose password to reset")
-    @click.password_option(help="New password (you will be prompted; typing is hidden)")
-    @click.option("--temporary", is_flag=True,
-                  help="Make them choose their own password at next login.")
-    def reset_manager_password_command(username, password, temporary):
-        """Set a new password for a MANAGER account (employees are reset in the app)."""
-        from auth import password_problem
-
-        username = username.strip().lower()
-        manager = User.query.filter_by(username=username).first()
-        if manager is None:
-            raise click.ClickException(f"No user named '{username}'.")
-        if manager.role != ROLE_MANAGER:
-            raise click.ClickException(
-                f"'{username}' is not a manager. Reset employee passwords in the app "
-                "(Employees -> their profile -> Reset password)."
-            )
-        problem = password_problem(password, username)
-        if problem:
-            raise click.ClickException(problem)
-
-        where, is_production = database_description()
-        click.echo(f"Database: {where}")
-        if is_production:
-            click.echo("This is the PRODUCTION database (the live site).")
-        click.confirm(f"Set a new password for manager '{username}'?", abort=True)
-
-        manager.set_password(password)               # only the hash is stored
-        manager.must_change_password = temporary
-        manager.session_version += 1                 # logs them out everywhere
-        log_activity(None, f"Password reset for manager '{username}' via CLI",
-                     category="account", target_user_id=manager.id)
-        db.session.commit()
-        click.echo(f"Password updated for '{username}'. Their open sessions were logged out.")
-        if not manager.is_active:
-            click.echo("Note: this account is deactivated, so it still can't log in.")
 
     def database_description():
         """Which database the app is connected to, WITHOUT the password: (text, is_production)."""
